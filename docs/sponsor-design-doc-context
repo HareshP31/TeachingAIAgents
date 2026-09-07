@@ -1,0 +1,92 @@
+# Sponsor Design Doc — Context Reference
+
+> Purpose: this file exists so future chat sessions don't need the original 81-page "Teaching AI Agents Final Design Document" PDF re-uploaded. It's a condensed but thorough summary of that document's actual content. For the *new* class project's own architecture and decisions (LangGraph, the demo scenario, etc.), see [project-architecture-plan.md](project-architecture-plan.md) in this same folder — that's the working doc, this is background/reference only.
+
+## What this document is
+
+The original PDF is the Senior Design I "Final Design Document" for a real, ongoing sponsor project: a student team (Haresh Palli, Kenneth Valladares, Sujan Katari, William Sharpe; sponsors Melissa Hills, Stewart Sutton) building an agentic AI system for the **United States Space Force (USSF)** to speed up acquisition research. **The sponsor already has their own production solution in progress** — the class project this context file supports is a separate, class-only demo/experiment inspired by this doc, not a continuation deliverable owed to the sponsor. See [project-architecture-plan.md](project-architecture-plan.md) section 1 for that framing.
+
+## Problem statement (why this exists at all)
+
+USSF acquisition timelines span years, which is too slow relative to how fast the space domain evolves and how fast adversaries move. Root causes named in the doc:
+- Acquisition is governed by dense, constantly-updated documentation (DAU guidance, FAR/DFARS) that requires deep expertise to navigate.
+- Staff manually comb through thousands of pages of PDFs for compliance — slow and error-prone.
+- Commercial/public AI can't be used directly because much of the source material isn't public.
+- No searchable knowledge repository exists — when experienced staff retire, their knowledge leaves with them.
+- USSF is navigating a **40% reduction in O-1/O-2 acquisition staffing**, compounding all of the above.
+
+## The sponsor's actual system architecture
+
+**Core agent: `nanobot`** — not a chatbot. Described as an "action-oriented digital partner": it does file management, automated reporting, and can actually execute multi-step tasks (web research, drafting documents), not just answer questions.
+
+**The two-machine split ("Tactical Hardware Deployment"):**
+- **Mac Mini ("Shield")** — runs nanobot. Handles all external communication: receiving user requests, managing conversation state, deciding what actions to take, doing internet research. This is the exposed/untrusted-facing half of the system.
+- **Mac Studio ("Brain")** — runs the actual LLM (Qwen3-32B, via LM Studio) and hosts the **Garrison API**. Never connects to the internet directly. Receives structured requests from the Mac Mini over a private point-to-point Ethernet link with a static IP schema, does the heavy inference, returns only processed text.
+- This is a deliberate hardware-level air gap, not just a software boundary — the philosophy is that even if the Mac Mini (internet-facing) is compromised, the Mac Studio (holding the actual model and sensitive reasoning) is physically isolated from that blast radius.
+
+**Garrison API** — the middleware between nanobot and the Edgerunner/Qwen models. Nanobot never talks to the model directly; everything goes through this API, which also centralizes logging/monitoring. Documented ports/endpoints in the original doc:
+- Port 3000: Operator Web UI (browser, auth required)
+- Port 8000: Garrison API itself (backend, JWT/cookie auth)
+- Port 8080: raw llama-server (OpenAI/Anthropic-compatible, no auth)
+- Endpoints include `/chat/completions`, `/history`, `/files`, `/collections` (RAG collections), `/embeddings`, `/images/generations`, `/audio/transcriptions`, `/audio/speech`.
+
+**Edgerunner AI** — the third-party startup whose models (fine-tuned Qwen, trained on DAU documents) the sponsor's system relies on for RAG/document reasoning. This is the piece the new class project replaces with a self-hosted equivalent (Qwen via LM Studio directly) since the class team won't have access to Edgerunner's proprietary models/infrastructure.
+
+## Why nanobot specifically (framework selection reasoning)
+
+Three options were compared:
+- **OpenClaw** — rejected: built for personal chatbot-style use, not real task execution; also had "numerous security concerns."
+- **NanoClaw** — the *original* choice, later abandoned. Reason for abandoning: NanoClaw only supports **Anthropic's API format**, but the sponsor needed **OpenAI's API format** specifically because of tools the sponsor wanted to use in the acquisition workflow.
+- **nanobot** — final choice. Supports task decomposition (breaking a request into steps: call APIs, search, organize output), gives fine-grained control over what the agent is allowed to do (important for Zero Trust), and supports the required OpenAI API format.
+
+## Security architecture (Zero Trust, in depth)
+
+- **Docker, ephemeral by design** — nanobot's web-research environment runs in hardened, non-persistent Docker containers. Every session starts from a clean state; containers are destroyed after each task, wiping cookies/cache/any session-based malware. Docker Swarm mentioned as a possible way to run multiple container copies for redundancy or throughput.
+- **IP masking** — nanobot's outbound traffic is routed through rotating, non-attributable IP addresses so its web research can't be traced back to USSF infrastructure by an adversary watching for acquisition-intent signals.
+- **Mediation layer** — a middleware gateway between nanobot and the public internet that strips identifying metadata (browser headers, fingerprints) and replaces it with a generic persona before any external request goes out.
+- **Read/write access** — nanobot only gets write access to a scoped staging/cache directory for web content; nothing else. Principle of least privilege applied literally at the filesystem level.
+- **Logging** — all nanobot actions and outputs are comprehensively logged, timestamped, and encrypted. Framed as a direct advantage over less secure alternatives (OpenClaw) and the backbone of the "Auditability" pillar.
+
+## Disaster recovery
+
+- **Vector store backup** — automated daily encrypted backups of the RAG vector database to a separate physical drive; recovery rolls back to last stable snapshot rather than re-processing the entire document library (which would take days).
+- **LLM version control** — specific LLM weight versions and LM Studio configs are pinned once verified by the test plan; a failing new model version can be reverted to the last known-good local version.
+- **Emergency handoff** — a physical/manual continuity plan if nanobot goes fully offline: hardware location maps, credential escrow (SSH/VPN keys), and a hard-copy index of what's in the vector database so officers can find source documents manually.
+- **Fallback protocols** — on hardware failure, the system drops to "manual reference mode" (research tools disabled, direct links to DAU folders provided) rather than trying to stay up in a degraded/insecure state. On network interruption between the two Macs, all agent processes suspend and state is saved locally rather than lost.
+
+## Test plan categories (from the doc — useful as a template for our own testing)
+
+| Category | Pass criteria named in the doc |
+|---|---|
+| Unit Testing | ≥90% line coverage, no regressions; Pytest + Jest |
+| Integration Testing | Successful end-to-end workflows; IP masking consistently shows non-USSF address |
+| Red-Team Testing | Agent cannot escalate privileges, cannot leak system prompts, stays sandboxed regardless of adversarial input (container escape, prompt injection, data exfiltration attempts) |
+| Latency Testing | ≥50% reduction in document drafting time vs. manual; System Usability Scale score >80 |
+| Hallucination Testing | <5% hallucination rate; 100% correct citation of real regulatory paragraph numbers (uses RAGAS framework) |
+| Persona Drift Testing | ≥95% consistency score across longitudinal tests; zero instances of dropping character over extended use |
+
+## Where our project's core idea actually comes from
+
+Buried in the original doc's "What's Next" section (future work the sponsor's team hadn't built yet) is a **Researcher + Auditor Critic Loop**: a Researcher persona optimized for high-recall data gathering, paired with a separate Auditor persona optimized for high-precision validation. The Auditor red-teams the Researcher's output for hallucinations, stale citations, and logical inconsistencies, sends it back for revision if it finds a problem, and only a human-in-the-loop reviewer sees the output once both agents reach consensus. **That pattern, still just a described concept in the sponsor's doc, is what our class project actually builds and makes literal.**
+
+The same "What's Next" section also names a longer-term vision of distilling the model down to a much smaller size so it can run on ruggedized/offline field hardware with no network dependency — explicitly for survivability in contested/degraded environments where a live link to a large model isn't guaranteed. That's the textual basis for our own local/edge deployment stance below — it's not us dodging a "should be cloud-hosted" expectation, it's the same design philosophy the sponsor's own team already committed to on paper, just realized now instead of left as a someday-idea.
+
+## What the new class project intentionally does differently — and how, concretely
+
+**1. The Critic Loop becomes an actual LangGraph state machine, not a described pattern.** Two graphs, not one:
+- **IngestionGraph** (parse → chunk → embed → store) — triggered whenever a document shows up. In our design, that's triggered by dropping a PDF into the Slack channel, not through a dashboard upload feature (the dashboard is read-only, purely a mirror of Postgres, never an input surface).
+- **ConversationGraph** — triggered fresh on every single Slack message. Nodes: **Route** (decides if this request needs live web research or can be answered from documents alone) → **Researcher** (nanobot — live web search, sandboxed) → **Analyst** (Qwen — drafts an answer grounded in retrieved document chunks + Researcher's findings) → **Auditor** (Qwen, a genuinely separate node/call with its own prompt — checks the Analyst's draft for gaps, hallucinations, stale citations) → **HumanReview** (a LangGraph `interrupt()` that pauses the graph and posts to Slack for approval) → **Notify** (delivers the final answer, logs the run).
+- The Auditor's rejection loops back to Researcher/Analyst for revision, capped at a small number of retries (a loop guard) so an unlucky live-model disagreement can't spin forever — important since this runs live in front of a class.
+- **HumanReview is threshold-gated, not "every run" or "never."** The Auditor returns a `risk_score` alongside its verdict; a configurable threshold decides whether a given approved answer needs a human to sign off, or auto-approves straight to Notify. A global override toggle exists to force review on every run when that's useful (e.g., during a live demo, so the audience always sees the approval gate fire).
+
+**2. Three layers, not a flat list of parts.** Slack and the dashboard are *interfaces* — they move messages/state in and out but make no decisions. LangGraph is the *one* orchestrator — it's the only thing that decides what happens next. nanobot and the Qwen model are *worker agents* — opaque nodes the orchestrator calls, the same relationship nanobot originally had to the Garrison API/Edgerunner models, just self-hosted now.
+
+**3. Edgerunner + Garrison API is replaced with a self-hosted equivalent** — Qwen via LM Studio directly, called by LangGraph the way nanobot used to call Garrison — since the class team has no access to Edgerunner's actual proprietary infrastructure.
+
+**4. Deployment is local-first by design, matching the sponsor's own edge-hardware ideal, not despite it.** Primary target: **one local machine** running the entire stack (FastAPI/LangGraph, nanobot's sandbox, LM Studio, Postgres+pgvector, PDF store) — realistic given the team is building on personal devices, not the sponsor's actual hardware. Backup: the sponsor's original two-Mac split (Mac Mini executing, Mac Studio doing inference), used only if that physical hardware becomes available. **There is no cloud option at either tier.** When a class rubric expects "where's this deployed" to mean "the cloud," the honest and correct answer here is the opposite: this system's entire premise is that acquisition data and inference never leave controlled, local hardware, and the sponsor's own doc already names small/edge-deployed models as the intended end state — building this locally is executing that vision, not falling short of a cloud-native one.
+
+**5. Model tiering accounts for the team actually building this on personal laptops.** Not everyone has hardware to run something like Qwen3-32B. Dev/demo default is a smaller quantized model from the same family (e.g. `Qwen2.5-7B-Instruct`, 4-bit GGUF via LM Studio) that runs on a typical modern laptop; the larger model stays aspirational for if stronger hardware (the sponsor's real Mac Studio, or a teammate's GPU) becomes available. Because the Auditor's structured `{is_valid, risk_score, issues}` output has to stay reliably parseable for any of the above routing to work, smaller/quantized models need constrained/grammar-based JSON decoding rather than hoping they free-form valid JSON.
+
+**6. The demo scenario is grounded in real material, not a fabricated case study.** The class team's actual ~28 DAU guideline PDFs (DoD Cloud Acquisition Guidebook, Agile Software Acquisition Guidebook, etc.) ground the RAG/onboarding half of a demo; nanobot's live web search against real public sources (SAM.gov, USAspending.gov) covers the market-research half — using a real, current example (the Air Force/Space Force **Cloud One** program, awarded to **SAIC**, ~$382.7M in March 2026). The Auditor's catch in the demo (flagging that a draft recommendation doesn't address vendor lock-in/hidden-cost risk) is grounded in a risk the team's actual Cloud Acquisition Guidebook names — not a staged/fake conflict.
+
+See [project-architecture-plan.md](project-architecture-plan.md) for the full detail behind every point above — the state diagrams, the node table, the deployment section's full reasoning, and the minute-by-minute demo script.
