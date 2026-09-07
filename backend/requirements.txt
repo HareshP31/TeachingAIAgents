@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+langgraph
+slack-bolt
+pypdf
+asyncpg
+pgvector
+sentence-transformers
+python-dotenv
+pydantic
