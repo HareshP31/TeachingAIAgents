@@ -2,7 +2,7 @@
 
 A locally-deployed, multi-agent research & audit system for acquisition research, built as a Senior Design class project. It extends a sponsor's original "Researcher/Auditor Critic Loop" concept into a concrete implementation: a LangGraph state machine orchestrating a web-research agent, a document-analysis/RAG agent, and a human-in-the-loop review gate — all running locally, no cloud.
 
-See [docs/project-architecture-plan.md](docs/project-architecture-plan.md) for the full design doc (architecture layers, graph flow, deployment plan, demo script, team roles).
+See [docs/project-architecture-plan.md](docs/project-architecture-plan.md) for the full design doc (architecture layers, graph flow, deployment plan, demo script).
 
 ## Layers at a glance
 
@@ -23,7 +23,7 @@ docker-compose.yml   Backend + nanobot sandbox + Postgres/pgvector
 
 ## Getting started
 
-Full install list is in section 12 of the architecture plan. Short version:
+Full install list is in section 11 of the architecture plan. Short version:
 
 - Python 3.11+, Node.js LTS, Docker Desktop, Git
 - [LM Studio](https://lmstudio.ai) installed natively on the host (not containerized) with `Qwen2.5-7B-Instruct` Q4_K_M loaded for dev/demo
@@ -42,10 +42,3 @@ npm install
 npm run dev
 ```
 
-## Team roles
-
-- **Agent Development** — LangGraph orchestration, nanobot Researcher wiring, Qwen Analyst/Auditor prompts + RAG pipeline, FastAPI/Slack glue.
-- **Frontend** — Next.js dashboard: document repository, compliance/risk view, graph trace visualizer, audit log stream.
-- **Security / Infrastructure** — Docker Compose, nanobot sandbox hardening, local deployment, secrets/config, audit logging pipeline.
-
-See section 11 of the architecture plan for details.

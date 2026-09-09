@@ -5,4 +5,4 @@ See docs/project-architecture-plan.md sections 3-4.
 """
 
 # TODO: define tables (documents, chunks w/ pgvector embedding column,
-# graph_runs, run_events) with asyncpg or an ORM of choice.
+# conversation_runs, run_log, app_settings) with psycopg (v3) or an ORM of choice.

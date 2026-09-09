@@ -17,4 +17,4 @@ endpoints — never talks to the database directly, and never accepts input
 - LangGraph run trace / reasoning graph visualizer
 - Security & audit log stream
 
-See `docs/project-architecture-plan.md` sections 4 and 10-11.
+See `docs/project-architecture-plan.md` sections 4, 10, and 11.

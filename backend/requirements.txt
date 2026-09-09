@@ -1,10 +1,11 @@
 fastapi
 uvicorn[standard]
 langgraph
+langgraph-checkpoint-postgres
 slack-bolt
+openai
 pypdf
-asyncpg
+psycopg[binary,pool]
 pgvector
 sentence-transformers
-python-dotenv
-pydantic
+pydantic-settings
