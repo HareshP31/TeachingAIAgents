@@ -5,12 +5,16 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+.coverage
+htmlcov/
 
 # Node / Next.js
 node_modules/
 .next/
 out/
 frontend/.env*.local
+coverage/
+.playwright-cli/
 
 # Env / secrets
 .env
@@ -25,6 +29,13 @@ pgdata/
 
 # Local model / staging dirs
 nanobot/staging/
+data/documents/
+data/postgres/
+data/model-cache/
+data/guidebooks/*
+!data/guidebooks/.gitkeep
+!data/guidebooks/drive-download-20260922T024818Z-1-001.zip
+!data/guidebooks/SHA256SUMS
 *.gguf
 
 # OS / editor

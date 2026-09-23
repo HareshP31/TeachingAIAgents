@@ -1,7 +1,16 @@
-"""Researcher node: backed by nanobot (sandboxed web search + scoped file I/O).
+from __future__ import annotations
 
-LangGraph feeds nanobot instructions and reads its output; no direct model
-access from this node. See docs/project-architecture-plan.md sections 3-4.
-"""
+from app.schemas import AuditResult, ConversationState
+from app.services.research import ResearchClient
 
-# TODO: wire up the call into the nanobot sandbox.
+
+class Researcher:
+    def __init__(self, client: ResearchClient) -> None:
+        self.client = client
+
+    async def run(self, state: ConversationState) -> dict:
+        audit = AuditResult.model_validate(state["audit"]) if state.get("audit") else None
+        response = await self.client.research(
+            state["run_id"], state["question"], state.get("research_findings"), audit,
+        )
+        return {"research_findings": [item.model_dump(mode="json") for item in response.findings]}

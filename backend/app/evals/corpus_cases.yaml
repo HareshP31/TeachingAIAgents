@@ -1,0 +1,77 @@
+version: 1
+cases:
+  - id: software-pathway
+    question: What conditions make the Software Acquisition Pathway appropriate?
+    expected_sources: ["DoDI 500087p - Operation of the Software Acquisition Pathway.pdf"]
+  - id: middle-tier
+    question: What are the rapid prototyping and rapid fielding paths under middle tier acquisition?
+    expected_sources: ["DoDI 500080p - Operation of the Middle Tier of Acquisition.pdf"]
+  - id: aaf-overview
+    question: What acquisition pathways are included in the Adaptive Acquisition Framework?
+    expected_sources: ["DoDI 500002p - Operation of the Adaptive Acquisition Framework.pdf", "DoD AAF Quick Ref Card --V3.7, 16Sep25.pdf"]
+  - id: aaf-current-card
+    question: According to the current AAF quick reference card, how are pathways selected?
+    expected_sources: ["DoD AAF Quick Ref Card --V3.7, 16Sep25.pdf"]
+  - id: aaf-history
+    question: Compare the historical 2024 and 2025 AAF quick reference card versions.
+    include_historical: true
+    expected_match: all
+    expected_sources: ["DoD AAF Quick Ref Card --V3.4, 21Oct24.pdf", "DoD AAF Quick Ref Card --V3.7, 16Sep25.pdf"]
+  - id: software-strategy
+    question: What belongs in a software acquisition strategy?
+    expected_sources: ["Software Acquisition Strategy -OUSD(A&S) Guidance V1.5 11May20.pdf"]
+  - id: agile-principles
+    question: Which Agile principles should a DoD program adopt?
+    expected_sources: ["DoD Agile-101, An Agile Primer, V2.0, 16May23.pdf"]
+  - id: agile-acquisition
+    question: How should acquisition teams apply Agile practices to software delivery?
+    expected_sources: ["Agile Software Acquisition Guidebook V1.0 27Feb20.pdf"]
+  - id: devsecops
+    question: What are the fundamental components of an enterprise DevSecOps approach?
+    expected_sources: ["DoD Enterprise DevSecOps Fundamentals V2.5 Oct2024.pdf"]
+  - id: software-test
+    question: How should developmental test and evaluation operate in DevSecOps?
+    expected_sources: ["Software Developmental Test and Evaluation in DevSecOps Guidebook, OUSD(R&E), Jan2025.pdf"]
+  - id: source-selection
+    question: What are the major roles and controls in a DoD source selection?
+    expected_sources: ["DoD Source Selection Procedures, DFAR Supplement, 20Aug22.pdf"]
+  - id: cloud-acquisition
+    question: What planning considerations apply to acquiring cloud computing services?
+    expected_sources: ["DAU - DoD Cloud Computing Acquisition Guidebook, V1.2, Nov2019.pdf"]
+  - id: risk-management
+    question: How should a program distinguish risks, issues, and opportunities?
+    expected_sources: ["DoD Risk, Issue, and Opportunity (RIO) Management Guide, OUSD(R&E), V2.2, Sep2023.pdf"]
+  - id: mission-engineering
+    question: What is the role of mission engineering in capability development?
+    expected_sources: ["DoD Mission Engineering Guide, V2.0, 01Oct23.pdf"]
+  - id: systems-engineering
+    question: What technical management processes support systems engineering?
+    expected_sources: ["Systems Engineering Guidebook, OUSD(R&E), Feb2022.pdf"]
+  - id: defense-engineering
+    question: How should engineering be integrated across a defense system lifecycle?
+    expected_sources: ["Engineering of Defense Systems Guidebook, OUSD(R&E) OSEA - July2024.pdf"]
+  - id: human-systems
+    question: How is human systems integration incorporated into acquisition planning?
+    expected_sources: ["Human Systems Integration (HSI) Guidebook, OUSD(R&E), May2022.pdf"]
+  - id: product-support
+    question: What responsibilities belong to a product support manager?
+    expected_sources: ["Product Support Manager (PSM) Guidebook, OUSD(A&S), May2022.pdf"]
+  - id: performance-logistics
+    question: What outcomes and metrics define performance-based logistics?
+    expected_sources: ["Performance-Based Logistics (PBL) Guidebook, OUSD(A&S), Oct2023.pdf"]
+  - id: digital-capabilities
+    question: How should requirements be developed for acquisition of digital capabilities?
+    expected_sources: ["Requirements for Acquisition of Digital Capabilities Guidebook, Office of DoD CIO, Jan2024.pdf"]
+  - id: space-force-requirements
+    question: How does the Space Force govern capability requirement development?
+    expected_sources: ["USSF Requirements Development Guidebook, Vol 1, Cap Dev Overview & Oper Cap Reqts Governance, 01Oct 23.pdf"]
+  - id: modeling-test
+    question: How should modeling and simulation support test and evaluation?
+    expected_sources: ["M&S for T&E Guidebook, May2025.pdf"]
+  - id: program-protection
+    question: What should a technology and program protection plan address?
+    expected_sources: ["DoD Technology and Program Protection Guidebook, OUSD(R&E), Jul2022.pdf"]
+  - id: absent-vendor-award
+    question: Which vendor won a fictional 2032 Lunar Cloud contract and for how much?
+    expected_sources: []
+    expected_behavior: insufficient

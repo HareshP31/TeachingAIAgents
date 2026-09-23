@@ -1,0 +1,20 @@
+cases:
+  - id: comma-filename
+    question: How should requirements be developed for acquisition of digital capabilities?
+    expected_sources:
+      - Requirements for Acquisition of Digital Capabilities Guidebook, Office of DoD CIO, Jan2024.pdf
+  - id: normal-filename
+    question: What responsibilities belong to a product support manager?
+    expected_sources:
+      - Product Support Manager (PSM) Guidebook, OUSD(A&S), May2022.pdf
+  - id: historical
+    question: Compare the historical 2024 and 2025 AAF quick reference card versions.
+    include_historical: true
+    expected_match: all
+    expected_sources:
+      - DoD AAF Quick Ref Card --V3.4, 21Oct24.pdf
+      - DoD AAF Quick Ref Card --V3.7, 16Sep25.pdf
+  - id: insufficient
+    question: Which vendor won a fictional 2032 Lunar Cloud contract and for how much?
+    expected_sources: []
+    expected_behavior: insufficient

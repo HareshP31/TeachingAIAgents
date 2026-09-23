@@ -1,0 +1,7 @@
+nanobot-ai==0.3.5
+ddgs>=9,<10
+httpx>=0.28,<1
+readability-lxml>=0.8.4,<1
+fastapi>=0.116,<1
+uvicorn[standard]>=0.35,<1
+pydantic>=2.11,<3

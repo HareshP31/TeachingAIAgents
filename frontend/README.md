@@ -1,20 +1,18 @@
 # Dashboard (Next.js)
 
-Not yet scaffolded. Bootstrap it with:
-
-```bash
-npx create-next-app@latest . --typescript --tailwind --app
-npm install @radix-ui/react-icons recharts lucide-react
-npx shadcn@latest init
-```
-
-Read-only mirror of the backend's Postgres tables via the FastAPI REST/WebSocket
-endpoints — never talks to the database directly, and never accepts input
-(documents go in via Slack, not the dashboard). Renders:
+Read-only, single-page operations console backed by FastAPI REST polling. It never talks to Postgres directly and never accepts document or workflow mutations. It renders:
 
 - Document repository view (ingestion status, chunking/vectorization metrics)
 - Compliance & risk breakdown
 - LangGraph run trace / reasoning graph visualizer
 - Security & audit log stream
 
-See `docs/project-architecture-plan.md` sections 4, 10, and 11.
+Polling runs every 1.5 seconds while work is active and every 10 seconds when idle.
+
+```bash
+npm install
+npm run dev
+npm run build
+```
+
+Set `NEXT_PUBLIC_API_URL` when the backend is not on `http://localhost:8000`.

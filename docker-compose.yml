@@ -1,35 +1,103 @@
-version: "3.9"
-
 services:
-  backend:
-    build: ./backend
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    depends_on:
-      - postgres
-    # LM Studio runs natively on the host, not in a container (GPU passthrough
-    # is unreliable across mixed hardware). Backend reaches it via
-    # host.docker.internal:<port> — see docs/project-architecture-plan.md section 5.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
   postgres:
     image: pgvector/pgvector:pg16
+    mem_limit: 2g
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-teaching_ai_agents}
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
 
-  # nanobot:
-  #   Sandboxed Task Execution Agent. Pulled from its own repo per its install
-  #   instructions (see docs/project-architecture-plan.md section 12) and wired
-  #   in here as a separate service once that setup is done.
+  nanobot:
+    build: ./nanobot
+    mem_limit: 1g
+    environment:
+      APP_MODE: ${APP_MODE:-fake}
+      LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      LM_STUDIO_MODEL: ${LM_STUDIO_MODEL:-qwen/qwen2.5-vl-7b}
+      NANOBOT_HOME: /home/nanobot/.nanobot
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/nanobot/.nanobot:uid=10001,gid=10001
+    volumes:
+      - nanobot_workspace:/workspace
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    mem_limit: 4g
+    environment:
+      APP_MODE: ${APP_MODE:-fake}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SLACK_ENABLED: ${SLACK_ENABLED:-false}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      LM_STUDIO_MODEL: ${LM_STUDIO_MODEL:-qwen/qwen2.5-vl-7b}
+      LM_STUDIO_API_KEY: ${LM_STUDIO_API_KEY:-lm-studio}
+      NANOBOT_URL: http://nanobot:8090
+      NANOBOT_TIMEOUT_SECONDS: ${NANOBOT_TIMEOUT_SECONDS:-150}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-teaching_ai_agents}
+      RISK_THRESHOLD: ${RISK_THRESHOLD:-50}
+      MATERIALITY_THRESHOLD: ${MATERIALITY_THRESHOLD:-10000000}
+      MAX_REVISIONS: ${MAX_REVISIONS:-2}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-large-en-v1.5}
+      RETRIEVAL_LIMIT: ${RETRIEVAL_LIMIT:-12}
+      FRONTEND_ORIGIN: http://localhost:3000
+      DOCUMENT_STORE: /data/documents
+      GUIDEBOOK_DIR: /data/guidebooks
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - documents:/data/documents
+      - ./data/guidebooks:/data/guidebooks:ro
+      - model_cache:/model-cache
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nanobot:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  frontend:
+    mem_limit: 1g
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  documents:
+  model_cache:
+  nanobot_workspace:
