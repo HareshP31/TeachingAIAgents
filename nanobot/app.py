@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import re
 import socket
@@ -39,7 +40,14 @@ class Finding(BaseModel):
     snippet_only: bool = False
 
 
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+logger = logging.getLogger(__name__)
 app = FastAPI(title="Teaching AI Agents nanobot adapter", version="0.1.0")
+
+# Must stay comfortably under NANOBOT_TIMEOUT_SECONDS (the backend's outer
+# HTTP timeout on this call), leaving room for the ddgs fallback below to
+# still run if the agent subprocess itself times out.
+AGENT_TIMEOUT_SECONDS = float(os.environ.get("NANOBOT_AGENT_TIMEOUT_SECONDS", "100"))
 
 
 async def stop_process(process: asyncio.subprocess.Process) -> None:
@@ -181,6 +189,12 @@ def configure_nanobot() -> None:
             "lmStudio": {
                 "provider": "lm_studio",
                 "model": os.environ.get("LM_STUDIO_MODEL", "qwen2.5-7b-instruct"),
+                # Must match LM Studio's actually-loaded context length, not nanobot's
+                # 200k default, or its own prompts silently overflow the real model
+                # and every research call fails over to the ddgs fallback.
+                "contextWindowTokens": int(os.environ.get("NANOBOT_CONTEXT_TOKENS", "8192")),
+                # Output budget must leave headroom for input within that same window.
+                "maxTokens": int(os.environ.get("NANOBOT_MAX_OUTPUT_TOKENS", "1024")),
             }
         },
         "agents": {"defaults": {"modelPreset": "lmStudio"}},
@@ -221,19 +235,24 @@ async def research(request: ResearchRequest) -> dict:
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=30)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=AGENT_TIMEOUT_SECONDS)
     except TimeoutError:
         await stop_process(process)
         stdout, stderr = b"", b"nanobot research timed out"
+        logger.warning("nanobot agent timed out after %ss", AGENT_TIMEOUT_SECONDS)
     except asyncio.CancelledError:
         await stop_process(process)
         raise
     if process.returncode:
+        logger.warning(
+            "nanobot agent exited %s: %s", process.returncode, stderr.decode(errors="ignore")[-500:],
+        )
         stdout = b""
     summary = stdout.decode(errors="ignore").strip()
     urls = list(dict.fromkeys(re.findall(r"https?://[^\s)>\]]+", summary)))
     urls = [url.rstrip(".,;") for url in urls if is_allowed_url(url, allowed)]
     if not urls:
+        logger.info("nanobot agent returned no allowlisted URL, falling back to ddgs")
         try:
             findings = await asyncio.wait_for(
                 asyncio.to_thread(search_with_ddgs, request.query, allowed), timeout=30,
@@ -249,6 +268,7 @@ async def research(request: ResearchRequest) -> dict:
             f"{item['title']}: {item['excerpt']} ({item['url']})" for item in findings
         )
         return {"findings": findings, "summary": summary, "live": True}
+    logger.info("nanobot agent produced %d allowlisted url(s) directly", len(urls))
     excerpt = summary[:1800]
     findings = [Finding(
         title=urlparse(url).hostname or "Public source", url=url,

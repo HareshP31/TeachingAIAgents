@@ -20,8 +20,12 @@ services:
     mem_limit: 1g
     environment:
       APP_MODE: ${APP_MODE:-fake}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
       LM_STUDIO_MODEL: ${LM_STUDIO_MODEL:-qwen/qwen2.5-vl-7b}
+      NANOBOT_CONTEXT_TOKENS: ${NANOBOT_CONTEXT_TOKENS:-16384}
+      NANOBOT_MAX_OUTPUT_TOKENS: ${NANOBOT_MAX_OUTPUT_TOKENS:-1024}
+      NANOBOT_AGENT_TIMEOUT_SECONDS: ${NANOBOT_AGENT_TIMEOUT_SECONDS:-100}
       NANOBOT_HOME: /home/nanobot/.nanobot
     extra_hosts:
       - "host.docker.internal:host-gateway"
