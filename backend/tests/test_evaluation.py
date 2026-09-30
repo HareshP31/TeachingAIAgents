@@ -27,6 +27,8 @@ async def test_retrieval_evaluation_reports_source_hit(tmp_path) -> None:
     expected_sources: []
     expected_behavior: insufficient
 """)
+    # FakeEmbedder + app_mode="test": deterministic, no real BGE embeddings,
+    # unrelated to the real local Qwen setup - fast/offline unit test only.
     evaluator = CorpusEvaluator(
         EvaluationRepository(), FakeEmbedder(), Settings(app_mode="test"),
     )

@@ -39,6 +39,11 @@ class ResearchFinding(BaseModel):
     url: HttpUrl | str
     excerpt: str
     retrieved_at: datetime
+    # "nanobot" = real Nanobot agent reasoning (the real local Qwen setup).
+    # "ddgs_fallback" = real live DuckDuckGo search, used when the real
+    # nanobot agent call fails/times out/returns no usable URL - still real
+    # data, just not via Nanobot's own reasoning. "fake" = APP_MODE=fake/test
+    # canned finding only, no real search at all; see ResearchClient.fake.
     source_mode: Literal["nanobot", "ddgs_fallback", "fake"] = "nanobot"
     fetched_at: datetime | None = None
     content_sha256: str | None = None

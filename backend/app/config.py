@@ -11,6 +11,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
+    # "fake"/"test" run entirely on scripted/deterministic stand-ins (see the
+    # `fake` branches in main.py, cli.py, embeddings.py, research.py,
+    # analyst.py, auditor.py) - no LM Studio, no real Qwen model, no BGE
+    # embeddings. They are NOT the local Qwen setup and have nothing to do
+    # with it; the real local pipeline is "local" (Slack-free) or "live"
+    # (Slack), both of which use the actual LM Studio/Qwen endpoint below.
     app_mode: Literal["fake", "test", "local", "live"] = "fake"
     log_level: str = "INFO"
     database_url: str = "postgresql://postgres:postgres@postgres:5432/teaching_ai_agents"

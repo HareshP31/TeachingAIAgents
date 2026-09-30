@@ -11,6 +11,15 @@ class Embedder(Protocol):
 
 
 class FakeEmbedder:
+    """Deterministic hash-based stand-in used only under APP_MODE=fake/test.
+
+    Crude keyword-bucket hashing, not a real embedding model - has no
+    relationship to the real local setup, which uses SentenceTransformerEmbedder
+    (bge-large-en-v1.5) below under APP_MODE=local/live. Fake- and real-mode
+    embeddings live in incompatible vector spaces and must never be mixed in
+    the same corpus import.
+    """
+
     def __init__(self, dimensions: int = 1024) -> None:
         self.dimensions = dimensions
 

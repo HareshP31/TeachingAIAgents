@@ -41,10 +41,14 @@ def enforce_audit_consistency(audit: AuditResult) -> AuditResult:
 class Auditor:
     def __init__(self, llm: LMStudioClient | None, fake: bool) -> None:
         self.llm = llm
-        self.fake = fake
+        self.fake = fake  # APP_MODE=fake/test only - see the branch below
 
     async def run(self, state: ConversationState) -> AuditResult:
         if self.fake:
+            # Scripted pass/reject, no LLM call. Unrelated to the real local
+            # Qwen setup: when self.fake is False (APP_MODE=local/live),
+            # self.llm.chat_json(...) below is the real Qwen2.5-7B-Instruct
+            # structured-output call via LM Studio.
             if state.get("research_findings"):
                 revised = state.get("revision_count", 0) > 0
                 return AuditResult(

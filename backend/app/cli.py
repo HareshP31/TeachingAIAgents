@@ -32,6 +32,8 @@ async def run(args: argparse.Namespace) -> None:
             await repository.set_always_review(args.enabled == "true")
             print(f"always_review={args.enabled}")
         elif args.command == "ingest":
+            # fake/test = hash-based FakeEmbedder, no real BGE, unrelated to
+            # the local Qwen setup - only real under APP_MODE=local/live.
             fake = settings.app_mode in {"fake", "test"}
             embedder = FakeEmbedder(settings.embedding_dimensions) if fake else SentenceTransformerEmbedder(settings.embedding_model)
             service = IngestionService(repository, embedder, settings)
@@ -42,6 +44,8 @@ async def run(args: argparse.Namespace) -> None:
                 result = await service.ingest_path(path)
                 print(f"{path.name}: {result}")
         elif args.command == "import-archive":
+            # fake/test = hash-based FakeEmbedder, no real BGE, unrelated to
+            # the local Qwen setup - only real under APP_MODE=local/live.
             fake = settings.app_mode in {"fake", "test"}
             embedder = FakeEmbedder(settings.embedding_dimensions) if fake else SentenceTransformerEmbedder(settings.embedding_model)
             ingestion = IngestionService(repository, embedder, settings)
@@ -59,6 +63,9 @@ async def run(args: argparse.Namespace) -> None:
             result = await repository.cleanup(args.kind)
             print(json.dumps(result))
         elif args.command == "eval-corpus":
+            # fake/test = hash-based FakeEmbedder + no LLM at all, unrelated
+            # to the local Qwen setup. Pass --full with APP_MODE=local/live
+            # to actually exercise the real Qwen model via LM Studio.
             fake = settings.app_mode in {"fake", "test"}
             embedder = FakeEmbedder(settings.embedding_dimensions) if fake else SentenceTransformerEmbedder(settings.embedding_model)
             analyst = auditor = None

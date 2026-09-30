@@ -29,7 +29,7 @@ class Analyst:
         self.embedder = embedder
         self.settings = settings
         self.llm = llm
-        self.fake = fake
+        self.fake = fake  # APP_MODE=fake/test only - see the branch below
 
     async def run(self, state: ConversationState) -> dict:
         query_vector = (await self.embedder.embed([state["question"]], query=True))[0]
@@ -42,6 +42,10 @@ class Analyst:
             include_historical=include_historical,
         )
         if self.fake:
+            # Scripted, hardcoded draft text - no LLM call happens here at
+            # all. Unrelated to the real local Qwen setup: when self.fake is
+            # False (APP_MODE=local/live), self.llm.chat(...) below is the
+            # real Qwen2.5-7B-Instruct call via LM Studio.
             if state.get("research_findings"):
                 draft = "SAIC holds a recent Cloud One continuation contract valued at about $382.7M [Web 1]."
                 if state.get("revision_count", 0) > 0:

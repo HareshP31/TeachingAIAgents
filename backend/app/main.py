@@ -40,6 +40,10 @@ async def lifespan(app: FastAPI):
     await database.open()
     await migrate(database)
     repository = Repository(database)
+    # `fake` here means APP_MODE=fake/test - deterministic stand-ins with no
+    # LM Studio/Qwen and no real BGE embeddings, unrelated to the real local
+    # Qwen setup. If you're debugging real local/live inference, `fake` is
+    # False and none of the FakeEmbedder/fake-ResearchClient paths below run.
     fake = settings.app_mode in {"fake", "test"}
     embedder = FakeEmbedder(settings.embedding_dimensions) if fake else SentenceTransformerEmbedder(settings.embedding_model)
     llm = None if fake else LMStudioClient(

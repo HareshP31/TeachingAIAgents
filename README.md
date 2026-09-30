@@ -2,48 +2,51 @@
 
 Local-first acquisition research and audit system. Slack drives two LangGraph workflows: PDF ingestion (`parse → chunk → embed → store`) and audited conversation runs (`Route → Researcher → Analyst → Auditor → HumanReview → Notify`). A read-only dashboard mirrors Postgres telemetry in real time.
 
-## Teammate quick start
+## Quick start (real local inference)
 
-Prerequisites: Git, Docker Desktop with Compose, at least 10 GB free disk, and 16 GB RAM minimum. A 32 GB machine is recommended for real local inference. Docker builds and installs the Python and npm dependencies; no host `npm install` is required for normal use.
+Prerequisites: Git, Docker Desktop with Compose, LM Studio, at least 10 GB free disk, and 16 GB RAM minimum. Docker builds and installs the Python and npm dependencies; no host `npm install` is required for normal use. A dedicated GPU is not required, but one materially speeds up inference — the full stack (LangGraph, real BGE embeddings, and a locally-served Qwen2.5-7B-Instruct model backing every reasoning node) has been validated end-to-end on a 4 GB-VRAM laptop GPU with partial layer offload, not just high-end hardware.
 
-The repository ships the complete 28-PDF corpus as `data/guidebooks/drive-download-20260922T024818Z-1-001.zip`. Do not unzip it manually.
+1. Install LM Studio, load `qwen2.5-7b-instruct`, and start its OpenAI-compatible server on port `1234` with local-network access enabled. Set its **Context Length to at least 16,384 tokens**. This is higher than a simple chat reply needs — Nanobot's own research/tool-use reasoning carries real overhead per turn, and a smaller window causes its live-research calls to silently fail over to a plain web-search fallback instead of using the model directly.
+2. The repository ships the complete 28-PDF corpus as `data/guidebooks/drive-download-20260922T024818Z-1-001.zip`. Do not unzip it manually. Verify it:
 
 ```bash
 (cd data/guidebooks && shasum -a 256 -c SHA256SUMS)
 ```
 
+3. Clone and configure:
+
 ```bash
 git clone https://github.com/HareshP31/TeachingAIAgents.git
 cd TeachingAIAgents
 cp .env.example .env
+```
+
+Edit `.env`:
+
+```dotenv
+APP_MODE=local
+SLACK_ENABLED=false
+LM_STUDIO_BASE_URL=http://host.docker.internal:1234/v1
+LM_STUDIO_MODEL=qwen2.5-7b-instruct
+NANOBOT_CONTEXT_TOKENS=16384
+```
+
+`NANOBOT_CONTEXT_TOKENS` must match whatever context length you actually set in LM Studio in step 1 — the two are independent settings that both need to agree.
+
+4. Build, start, and import the corpus:
+
+```bash
 docker compose up -d --build
 docker compose exec -T backend python -m app.cli import-archive /data/guidebooks/drive-download-20260922T024818Z-1-001.zip
 ```
 
 Open the dashboard at `http://localhost:3000`. Readiness is available at `http://localhost:8000/health/ready`, and API documentation at `http://localhost:8000/docs`.
 
-The default `.env.example` uses deterministic fake mode, so this startup path needs neither LM Studio nor Slack. Fake mode exercises Postgres, pgvector, ingestion, LangGraph, risk scoring, checkpointed review, the REST API, and dashboard. Choose fake or local mode before importing: stored embeddings are mode-specific.
-
-## Run with the real local 7B model, without Slack
-
-1. Install LM Studio and load the exact model ID `qwen/qwen2.5-vl-7b`. Do not use a 27B model.
-2. Start LM Studio's OpenAI-compatible server on port `1234`, enable local-network access, and use a context length of at least 4,096 tokens.
-3. Before the first corpus import, edit `.env`:
-
-```dotenv
-APP_MODE=local
-SLACK_ENABLED=false
-LM_STUDIO_BASE_URL=http://host.docker.internal:1234/v1
-LM_STUDIO_MODEL=qwen/qwen2.5-vl-7b
-```
-
-4. Run the same `docker compose up -d --build` and `import-archive` commands from the quick start.
-
-Local mode uses real LM Studio inference, BGE embeddings, Nanobot/public-source research, Postgres, and LangGraph. It retains `/api/dev/runs` and `/api/dev/runs/{run_id}/review` for Slack-free testing.
+This path uses real LM Studio inference, real BGE embeddings, real Nanobot/public-source research, Postgres, and LangGraph throughout — nothing in it is simulated. It also exposes `/api/dev/runs` and `/api/dev/runs/{run_id}/review` so the full pipeline can be exercised without Slack.
 
 ## Enable Slack/live mode
 
-1. Complete the real-local setup above and confirm `/health/ready` reports ready.
+1. Complete the setup above and confirm `/health/ready` reports ready.
 2. Import [slack-app-manifest.yaml](slack-app-manifest.yaml) into the target Slack workspace.
 3. Install the app, invite it to a dedicated test channel, and create an app-level token with `connections:write`.
 4. Put the `xoxb` bot token and `xapp` app token only in local `.env`; never commit or paste them into chat.
@@ -67,7 +70,7 @@ docker compose exec backend python -m app.cli cleanup failed
 python3 scripts/smoke.py
 ```
 
-Retrieval evaluation ships with 24 corpus cases in `backend/app/evals/corpus_cases.yaml`. Production and evaluation use a 12-chunk evidence window, which reached a 95.65% expected-source hit rate on this corpus. Use `--full` only while the 7B LM Studio server is running; it adds analyst/auditor answer and citation checks.
+Retrieval evaluation ships with 24 corpus cases in `backend/app/evals/corpus_cases.yaml`. Production and evaluation use a 12-chunk evidence window, which reached a 95.65% expected-source hit rate on this corpus. Use `--full` only while the LM Studio server is running; it adds real Analyst/Auditor answer and citation checks.
 
 ## Backup and recovery
 
@@ -94,4 +97,4 @@ docker compose config --quiet
 bash -n scripts/backup.sh scripts/restore.sh
 ```
 
-No OpenAI, Anthropic, hosted embedding, or external storage account is used. Runtime inference is pinned to Qwen 2.5 VL 7B; 27B models are rejected to protect this 32 GB host. Slack and live public-web research still require internet access. See [docs/project-architecture-plan.md](docs/project-architecture-plan.md) for the original design and [docs/outstanding-work-plan.md](docs/outstanding-work-plan.md) for the corpus rollout plan.
+No OpenAI, Anthropic, hosted embedding, or external storage account is used. Runtime inference is pinned to Qwen2.5-7B-Instruct; 27B models are rejected to keep inference within reach of modest hardware. Slack and live public-web research still require internet access. See [docs/project-architecture-plan.md](docs/project-architecture-plan.md) for the original design and [docs/outstanding-work-plan.md](docs/outstanding-work-plan.md) for the corpus rollout plan.

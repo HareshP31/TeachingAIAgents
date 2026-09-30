@@ -40,6 +40,10 @@ class MemoryRepository:
 
 
 def graph_fixture() -> tuple[ConversationGraph, MemoryRepository]:
+    # app_mode="test" + FakeEmbedder + fake=True below: deterministic,
+    # no LM Studio/Qwen and no real BGE embeddings, so this fixture never
+    # touches the real local Qwen setup - that's the point, for fast/offline
+    # unit tests, not a reflection of production (local/live) behavior.
     settings = Settings(app_mode="test", database_url="postgresql://unused")
     repository = MemoryRepository()
     embedder = FakeEmbedder()

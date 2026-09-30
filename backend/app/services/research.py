@@ -18,13 +18,17 @@ class ResearchClient:
     def __init__(self, url: str, timeout: float, fake: bool = False) -> None:
         self.url = url.rstrip("/")
         self.timeout = timeout
-        self.fake = fake
+        self.fake = fake  # APP_MODE=fake/test only - see class docstring below
 
     async def research(
         self, run_id: str, query: str, prior: list[dict] | None = None,
         audit: AuditResult | None = None,
     ) -> ResearchResponse:
         if self.fake:
+            # Deterministic canned finding, never actually calls the real
+            # nanobot HTTP service below. Unrelated to the real local Qwen
+            # setup - real local/live mode always hits self.url (nanobot),
+            # which in turn calls Qwen via LM Studio for its own reasoning.
             finding = ResearchFinding(
                 title="Cloud One continuation contract",
                 url="https://www.usaspending.gov/award/CONT_AWD_FA872624F0001_9700_47QTCK18D0001_4732",
