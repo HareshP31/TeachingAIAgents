@@ -88,6 +88,8 @@ class ConversationState(TypedDict, total=False):
     question: str
     route: Literal["research", "analyst"]
     route_reason: str
+    document_ids: list[str]
+    scope_label: str
     research_findings: list[dict[str, Any]]
     retrieved_chunks: list[dict[str, Any]]
     draft: str

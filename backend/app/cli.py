@@ -59,6 +59,14 @@ async def run(args: argparse.Namespace) -> None:
                 if args.import_id else await repository.list_corpus_imports()
             )
             print(json.dumps(result, default=str))
+        elif args.command == "nickname":
+            matches = await repository.find_documents(args.filename_fragment)
+            if len(matches) != 1:
+                names = "; ".join(item["filename"] for item in matches) or "none"
+                raise SystemExit(f"expected exactly one document matching, found {len(matches)}: {names}")
+            nickname = " ".join(args.nickname).strip() or None
+            await repository.set_nickname(matches[0]["id"], nickname)
+            print(f"{matches[0]['filename']} -> {nickname!r}")
         elif args.command == "cleanup":
             result = await repository.cleanup(args.kind)
             print(json.dumps(result))
@@ -102,6 +110,9 @@ def main() -> None:
     archive.add_argument("path")
     status = commands.add_parser("corpus-status")
     status.add_argument("import_id", nargs="?")
+    nickname = commands.add_parser("nickname", help="Give a document a short name to use in questions")
+    nickname.add_argument("filename_fragment", help="part of the filename; must match one document")
+    nickname.add_argument("nickname", nargs="*", help="omit to clear the nickname")
     cleanup = commands.add_parser("cleanup")
     cleanup.add_argument("kind", choices=["synthetic", "failed", "stale"])
     evaluation = commands.add_parser("eval-corpus")

@@ -10,6 +10,8 @@ oauth_config:
   scopes:
     bot:
       - app_mentions:read
+      - channels:join
+      - channels:read
       - chat:write
       - files:read
       - im:history
@@ -17,6 +19,7 @@ settings:
   event_subscriptions:
     bot_events:
       - app_mention
+      - channel_created
       - file_shared
       - message.im
   interactivity:

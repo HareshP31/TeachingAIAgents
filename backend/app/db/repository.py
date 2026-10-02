@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID, uuid4
 
+from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from app.db.database import Database
+from app.services.progress import progress_label, progress_percent
 
 
 def _vector(values: list[float]) -> str:
@@ -225,7 +227,9 @@ class Repository:
                               chunk_count=0, page_count=NULL, text_char_count=NULL,
                               extraction_method=NULL,
                               corpus_import_id=COALESCE(%s,corpus_import_id),
-                              source_member=COALESCE(%s,source_member), updated_at=now()
+                              source_member=COALESCE(%s,source_member),
+                              stage=NULL, progress_done=NULL, progress_total=NULL,
+                              updated_at=now()
                        WHERE id=%s""",
                     (slack_file_id, filename, storage_path, corpus_import_id,
                      source_member, existing[0]),
@@ -249,6 +253,67 @@ class Repository:
                 (status, chunk_count, error, page_count, text_char_count,
                  extraction_method, document_id),
             )
+
+    async def set_document_progress(
+        self, document_id: str | UUID, stage: str, done: int | None = None, total: int | None = None,
+    ) -> None:
+        async with self.database.connection() as conn, conn.transaction():
+            await conn.execute(
+                """UPDATE documents SET stage=%s, progress_done=%s, progress_total=%s,
+                   updated_at=now() WHERE id=%s""",
+                (stage, done, total, document_id),
+            )
+
+    async def set_nickname(self, document_id: str | UUID, nickname: str | None) -> bool:
+        """False if there is no such document; ValueError on a duplicate nickname."""
+        try:
+            async with self.database.connection() as conn, conn.transaction():
+                cursor = await conn.execute(
+                    "UPDATE documents SET nickname=%s, updated_at=now() WHERE id=%s",
+                    (nickname, document_id),
+                )
+                return cursor.rowcount > 0
+        except UniqueViolation as exc:
+            raise ValueError(f"Nickname '{nickname}' is already used by another document") from exc
+
+    async def find_documents(self, fragment: str) -> list[dict[str, Any]]:
+        async with self.database.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(
+                    "SELECT id, filename, nickname FROM documents WHERE filename ILIKE %s ORDER BY filename",
+                    (f"%{fragment}%",),
+                )
+                return list(await cursor.fetchall())
+
+    async def record_upload(self, document_id: str | UUID, channel_id: str) -> None:
+        """Remember which channel a document was (re-)uploaded in. Provenance only:
+        every document is searchable from every channel."""
+        async with self.database.connection() as conn, conn.transaction():
+            await conn.execute(
+                """INSERT INTO document_channels(document_id, channel_id) VALUES (%s,%s)
+                   ON CONFLICT (document_id, channel_id) DO UPDATE SET created_at=now()""",
+                (document_id, channel_id),
+            )
+
+    async def document_index(self, channel_id: str | None = None) -> list[dict[str, Any]]:
+        """All searchable documents, used to resolve question scope.
+
+        `channel_linked_at` is when the document was last uploaded in `channel_id`;
+        `last_uploaded_at` is the latest upload in any channel. Both are NULL for
+        documents that only came from a corpus import.
+        """
+        async with self.database.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(
+                    """SELECT d.id, d.filename, d.nickname, d.is_canonical, d.created_at,
+                              (SELECT dc.created_at FROM document_channels dc
+                               WHERE dc.document_id=d.id AND dc.channel_id=%s) AS channel_linked_at,
+                              (SELECT max(dc.created_at) FROM document_channels dc
+                               WHERE dc.document_id=d.id) AS last_uploaded_at
+                       FROM documents d WHERE d.status='ready'""",
+                    (channel_id,),
+                )
+                return list(await cursor.fetchall())
 
     async def set_document_version(
         self, document_id: str | UUID, *, version_family: str,
@@ -275,21 +340,26 @@ class Repository:
 
     async def search_chunks(
         self, embedding: list[float], limit: int = 8, *, include_historical: bool = False,
+        document_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        scoped = [UUID(item) for item in document_ids] if document_ids else None
         query = """
           SELECT c.id, c.document_id, c.text, c.page_start, c.page_end, d.filename,
                  d.version_family,
                  1 - (c.embedding <=> %s::vector) AS score
           FROM chunks c JOIN documents d ON d.id=c.document_id
           WHERE d.status='ready' AND (%s OR d.is_canonical)
+            AND (%s::uuid[] IS NULL OR d.id = ANY(%s::uuid[]))
           ORDER BY c.embedding <=> %s::vector LIMIT %s
         """
         value = _vector(embedding)
         async with self.database.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cursor:
-                await cursor.execute(query, (value, include_historical, value, limit))
+                await cursor.execute(
+                    query, (value, include_historical, scoped, scoped, value, limit),
+                )
                 rows = list(await cursor.fetchall())
-                if not include_historical:
+                if not include_historical or scoped:
                     return rows
                 families = sorted({row["version_family"] for row in rows if row["version_family"]})
                 if not families:
@@ -317,17 +387,56 @@ class Repository:
                     return rows
                 return rows[:max(0, limit - len(companions))] + companions[:limit]
 
-    async def list_documents(self, limit: int = 100) -> list[dict[str, Any]]:
+    _DOCUMENT_COLUMNS = """id, filename, nickname, status, chunk_count, error, page_count,
+                   text_char_count, extraction_method, version_family, is_canonical,
+                   superseded_by, corpus_import_id, slack_file_id, stage, progress_done,
+                   progress_total, created_at, updated_at,
+                   (SELECT COALESCE(array_agg(dc.channel_id ORDER BY dc.channel_id), '{}')
+                      FROM document_channels dc WHERE dc.document_id = documents.id) AS channel_ids"""
+
+    @staticmethod
+    def _with_progress(row: dict[str, Any]) -> dict[str, Any]:
+        stage, done, total = row.get("stage"), row.get("progress_done"), row.get("progress_total")
+        row["progress_percent"] = 100 if row["status"] == "ready" else progress_percent(stage, done, total)
+        row["progress_label"] = progress_label(stage, done, total)
+        row["uploaded_via_slack"] = bool(row.pop("slack_file_id", None))
+        return row
+
+    async def list_documents(
+        self, limit: int = 100, offset: int = 0, query: str | None = None,
+    ) -> list[dict[str, Any]]:
+        pattern = f"%{query.strip()}%" if query and query.strip() else None
         async with self.database.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cursor:
                 await cursor.execute(
-                    """SELECT id, filename, status, chunk_count, error, page_count,
-                              text_char_count, extraction_method, version_family,
-                              is_canonical, superseded_by, corpus_import_id,
-                              created_at, updated_at
-                       FROM documents ORDER BY created_at DESC LIMIT %s""", (limit,)
+                    f"""SELECT {self._DOCUMENT_COLUMNS} FROM documents
+                        WHERE (%s::text IS NULL OR filename ILIKE %s OR nickname ILIKE %s)
+                        ORDER BY created_at DESC, filename LIMIT %s OFFSET %s""",
+                    (pattern, pattern, pattern, limit, offset),
                 )
-                return list(await cursor.fetchall())
+                return [self._with_progress(row) for row in await cursor.fetchall()]
+
+    async def count_documents(self, query: str | None = None) -> int:
+        pattern = f"%{query.strip()}%" if query and query.strip() else None
+        async with self.database.connection() as conn:
+            cursor = await conn.execute(
+                """SELECT count(*) FROM documents
+                   WHERE (%s::text IS NULL OR filename ILIKE %s OR nickname ILIKE %s)""",
+                (pattern, pattern, pattern),
+            )
+            return (await cursor.fetchone())[0]
+
+    async def list_active_documents(self) -> list[dict[str, Any]]:
+        """Documents being ingested right now, plus any that failed in the last hour."""
+        async with self.database.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(
+                    f"""SELECT {self._DOCUMENT_COLUMNS} FROM documents
+                        WHERE status IN ('pending','processing')
+                           OR (status='failed' AND updated_at > now() - interval '1 hour')
+                        ORDER BY created_at DESC LIMIT 10""",
+                )
+                return [self._with_progress(row) for row in await cursor.fetchall()]
 
     async def list_runs(self, limit: int = 25, status: str | None = None) -> list[dict[str, Any]]:
         params: list[Any] = []

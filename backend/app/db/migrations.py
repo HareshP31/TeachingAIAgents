@@ -27,8 +27,19 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS extraction_method text;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS version_family text;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_canonical boolean NOT NULL DEFAULT true;
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS superseded_by uuid REFERENCES documents(id);
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS nickname text;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS stage text;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS progress_done integer;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS progress_total integer;
+CREATE UNIQUE INDEX IF NOT EXISTS documents_nickname_idx ON documents(lower(nickname)) WHERE nickname IS NOT NULL;
 CREATE INDEX IF NOT EXISTS documents_corpus_import_idx ON documents(corpus_import_id);
 CREATE INDEX IF NOT EXISTS documents_canonical_idx ON documents(is_canonical) WHERE status='ready';
+CREATE TABLE IF NOT EXISTS document_channels (
+ document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+ channel_id text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+ PRIMARY KEY (document_id, channel_id)
+);
+CREATE INDEX IF NOT EXISTS document_channels_channel_idx ON document_channels(channel_id);
 CREATE TABLE IF NOT EXISTS chunks (
  id bigserial PRIMARY KEY, document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
  ordinal integer NOT NULL, page_start integer NOT NULL, page_end integer NOT NULL,

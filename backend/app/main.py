@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import asynccontextmanager
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.agents.analyst import Analyst
 from app.agents.auditor import Auditor
@@ -127,13 +128,55 @@ async def overview(request: Request) -> dict:
         "always_review": await repository.always_review(),
         "imports": await repository.list_corpus_imports(5),
         "documents": await repository.list_documents(8),
+        "ingesting": await repository.list_active_documents(),
+        "document_total": await repository.count_documents(),
         "runs": await repository.list_runs(25),
     }
 
 
 @app.get("/api/documents")
-async def documents(request: Request, limit: int = 100) -> list[dict]:
-    return await request.app.state.repository.list_documents(min(max(limit, 1), 200))
+async def documents(
+    request: Request, limit: int = 10, offset: int = 0, q: str | None = None,
+) -> dict:
+    repository: Repository = request.app.state.repository
+    limit = min(max(limit, 1), 100)
+    offset = max(offset, 0)
+    return {
+        "items": await repository.list_documents(limit, offset, q),
+        "total": await repository.count_documents(q),
+        "limit": limit, "offset": offset,
+    }
+
+
+class NicknameRequest(BaseModel):
+    nickname: str | None = None
+
+    @field_validator("nickname")
+    @classmethod
+    def clean(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = " ".join(value.split())
+        if not value:
+            return None
+        if not 2 <= len(value) <= 40 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _\-]*", value):
+            raise ValueError("Nickname must be 2-40 characters: letters, numbers, spaces, - or _")
+        return value
+
+
+@app.post("/api/documents/{document_id}/nickname")
+async def set_document_nickname(document_id: str, body: NicknameRequest, request: Request) -> dict:
+    try:
+        UUID(document_id)
+    except ValueError as exc:
+        raise HTTPException(404, "Document not found") from exc
+    try:
+        found = await request.app.state.repository.set_nickname(document_id, body.nickname)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if not found:
+        raise HTTPException(404, "Document not found")
+    return {"id": document_id, "nickname": body.nickname}
 
 
 @app.get("/api/runs")

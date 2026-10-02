@@ -51,6 +51,7 @@ services:
       SLACK_ENABLED: ${SLACK_ENABLED:-false}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      SLACK_AUTO_JOIN: ${SLACK_AUTO_JOIN:-true}
       LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
       LM_STUDIO_MODEL: ${LM_STUDIO_MODEL:-qwen/qwen2.5-vl-7b}
       LM_STUDIO_API_KEY: ${LM_STUDIO_API_KEY:-lm-studio}

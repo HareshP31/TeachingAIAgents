@@ -13,6 +13,7 @@ from app.config import Settings
 from app.db.repository import Repository
 from app.schemas import AuditResult, CitationIssue, ConversationState, ReviewDecision
 from app.services.risk import calculate_risk
+from app.services.scope import resolve_scope, wants_historical
 
 
 _RESEARCH_TERMS = {
@@ -45,10 +46,11 @@ class ConversationGraph:
         builder.add_edge("researcher", "analyst")
         builder.add_edge("analyst", "auditor")
         builder.add_conditional_edges("auditor", self._after_auditor, {
-            "researcher": "researcher", "human_review": "human_review", "notify": "notify",
+            "researcher": "researcher", "analyst": "analyst",
+            "human_review": "human_review", "notify": "notify",
         })
         builder.add_conditional_edges("human_review", self._after_review, {
-            "researcher": "researcher", "notify": "notify",
+            "researcher": "researcher", "analyst": "analyst", "notify": "notify",
         })
         builder.add_edge("notify", END)
         self.graph = builder.compile(checkpointer=checkpointer or InMemorySaver())
@@ -77,13 +79,37 @@ class ConversationGraph:
         )
 
     async def _route(self, state: ConversationState) -> dict:
-        normalized = state["question"].lower()
+        question = state["question"]
+        scope = resolve_scope(
+            question, await self.repository.document_index(state.get("channel_id")),
+            include_historical=wants_historical(question),
+        )
+        route: Literal["research", "analyst"]
+        if scope:
+            # The user asked about a specific document: answer from it only and
+            # never detour to web search, including on revision passes.
+            route = "analyst"
+            reason = f"scoped to {scope.label} (matched {scope.reason.replace('_', ' ')}); web research skipped"
+            await self.repository.update_run(state["run_id"], route=route, route_reason=reason)
+            await self.repository.log_node(
+                state["run_id"], "Route", reason,
+                details={"document_ids": scope.document_ids, "scope_reason": scope.reason},
+            )
+            return {
+                "route": route, "route_reason": reason, "revision_count": 0,
+                "document_ids": scope.document_ids, "scope_label": scope.label,
+            }
+        normalized = question.lower()
         matches = sorted(term for term in _RESEARCH_TERMS if term in normalized)
-        route: Literal["research", "analyst"] = "research" if matches else "analyst"
+        route = "research" if matches else "analyst"
         reason = f"matched freshness/market terms: {', '.join(matches)}" if matches else "guidebook-first default"
         await self.repository.update_run(state["run_id"], route=route, route_reason=reason)
         await self.repository.log_node(state["run_id"], "Route", reason)
         return {"route": route, "route_reason": reason, "revision_count": 0}
+
+    @staticmethod
+    def _retry_target(state: ConversationState) -> str:
+        return "analyst" if state.get("document_ids") else "researcher"
 
     @staticmethod
     def _after_route(state: ConversationState) -> str:
@@ -137,7 +163,7 @@ class ConversationGraph:
     def _after_auditor(self, state: ConversationState) -> str:
         audit = AuditResult.model_validate(state["audit"])
         if not audit.is_valid and state.get("revision_count", 0) < self.settings.max_revisions:
-            return "researcher"
+            return self._retry_target(state)
         if state.get("needs_review") or not audit.is_valid:
             return "human_review"
         return "notify"
@@ -171,9 +197,8 @@ class ConversationGraph:
             return {"review": decision.model_dump(), "audit": audit.model_dump(mode="json")}
         return {"review": decision.model_dump()}
 
-    @staticmethod
-    def _after_review(state: ConversationState) -> str:
-        return "notify" if state.get("review", {}).get("approved") else "researcher"
+    def _after_review(self, state: ConversationState) -> str:
+        return "notify" if state.get("review", {}).get("approved") else self._retry_target(state)
 
     async def _notify(self, state: ConversationState) -> dict:
         answer = state.get("draft", "")

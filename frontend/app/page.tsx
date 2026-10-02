@@ -2,6 +2,7 @@
 
 import {useEffect, useMemo, useState} from "react";
 import {Activity, BookOpen, Bot, CircleAlert, Database, FileText, ShieldCheck} from "lucide-react";
+import {DocumentsTable} from "@/components/documents-table";
 import {GraphTrace} from "@/components/graph-trace";
 import {RiskCard} from "@/components/risk-card";
 import type {Overview, Ready, RunDetail} from "@/lib/types";
@@ -43,7 +44,8 @@ export default function Dashboard() {
           const detailResponse = await fetch(`${API}/api/runs/${target}`, {cache: "no-store"});
           if (detailResponse.ok) setRun(await detailResponse.json());
         }
-        const active = nextOverview.runs.some(item => activeStates.has(item.status));
+        const active = nextOverview.runs.some(item => activeStates.has(item.status))
+          || nextOverview.ingesting.some(item => item.status === "pending" || item.status === "processing");
         timer = setTimeout(poll, active ? 1500 : 10000);
       } catch (reason) {
         if (!stopped) {setError(reason instanceof Error ? reason.message : "Connection failed"); timer = setTimeout(poll, 5000);}
@@ -56,6 +58,8 @@ export default function Dashboard() {
   const nodeLog = run?.log ?? [];
   const dependencyCount = useMemo(() => Object.values(ready?.checks ?? {}).filter(Boolean).length, [ready]);
   const latestImport = overview?.imports?.[0];
+  const ingesting = overview?.ingesting ?? [];
+  const documentsKey = `${overview?.document_total}|${overview?.documents[0]?.updated_at}|${ingesting.map(item => `${item.id}:${item.status}:${item.progress_percent}`).join(",")}`;
 
   return <main>
     <header>
@@ -76,8 +80,16 @@ export default function Dashboard() {
             </button>) : <div className="empty"><Bot/><span>No agent runs yet</span></div>}</div>
         </section>
         <section className="panel documents-panel"><div className="panel-heading"><span>Document repository</span><span className="eyebrow">{latestImport ? `${latestImport.status} · ${latestImport.summary?.ready ?? 0}/${latestImport.summary?.total ?? 0}` : "NO IMPORT"}</span></div>
+          {ingesting.length > 0 && <div className="ingest-list">{ingesting.map(item =>
+            <div key={item.id} className={`ingest-row ${item.status}`}>
+              <span className="ingest-name"><FileText size={13}/><b title={item.filename}>{item.filename}</b></span>
+              {item.status === "failed"
+                ? <small className="ingest-failed">Failed{item.error ? `: ${item.error}` : ""}</small>
+                : <><div className="progress-track" role="progressbar" aria-valuenow={item.progress_percent} aria-valuemin={0} aria-valuemax={100}><div style={{width: `${item.progress_percent}%`}}/></div>
+                  <small>{item.progress_percent}% · {item.progress_label}</small></>}
+            </div>)}</div>}
           <div className="document-list">{overview?.documents.length ? overview.documents.map(document =>
-            <div key={document.id}><div className="file-icon"><FileText size={15}/></div><span><b>{document.filename}</b><small>{document.page_count ?? "?"} pages · {document.chunk_count} vectors · {document.extraction_method ?? document.status}{document.is_canonical ? " · canonical" : " · historical"}</small></span><i className={document.status}/></div>) :
+            <div key={document.id}><div className="file-icon"><FileText size={15}/></div><span><b>{document.nickname ? `${document.nickname} · ` : ""}{document.filename}</b><small>{document.page_count ?? "?"} pages · {document.chunk_count} vectors · {document.extraction_method ?? document.status}{document.is_canonical ? " · canonical" : " · historical"}</small></span><i className={document.status}/></div>) :
             <div className="empty"><BookOpen/><span>Upload a PDF in Slack</span></div>}</div>
         </section>
       </aside>
@@ -105,6 +117,7 @@ export default function Dashboard() {
         </section>
       </aside>
     </div>
+    <DocumentsTable api={API} refreshKey={documentsKey}/>
     <footer><span>LOCAL-FIRST · POSTGRES + PGVECTOR · QWEN VIA LM STUDIO</span><span>Polling securely from {API}</span></footer>
   </main>;
 }

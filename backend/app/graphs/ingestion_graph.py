@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 import shutil
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import TypedDict
 from uuid import UUID
 
@@ -15,6 +17,13 @@ from app.config import Settings
 from app.db.repository import Repository
 from app.services.chunking import chunk_pages
 from app.services.embeddings import Embedder
+from app.services.progress import progress_percent
+
+logger = logging.getLogger(__name__)
+
+EMBED_BATCH = 32
+# (stage, done, total, percent) -> awaitable; used for Slack status updates.
+ProgressCallback = Callable[[str, int, int, int], Awaitable[None]]
 
 
 class IngestionState(TypedDict, total=False):
@@ -29,6 +38,7 @@ class IngestionState(TypedDict, total=False):
     chunks: list[dict]
     embeddings: list[list[float]]
     chunk_count: int
+    progress_cb: ProgressCallback | None
 
 
 class IngestionService:
@@ -52,6 +62,7 @@ class IngestionService:
         self, source: Path, slack_file_id: str | None = None,
         *, corpus_import_id: str | UUID | None = None,
         source_member: str | None = None, display_filename: str | None = None,
+        slack_channel_id: str | None = None, on_progress: ProgressCallback | None = None,
     ) -> dict:
         if source.suffix.lower() != ".pdf":
             raise ValueError("Only PDF documents are supported")
@@ -70,17 +81,21 @@ class IngestionService:
             slack_file_id=slack_file_id, corpus_import_id=corpus_import_id,
             source_member=source_member,
         )
+        if slack_channel_id:
+            # Every document is searchable from every channel; this only records where
+            # it was uploaded so "the document I just uploaded" can prefer this channel.
+            await self.repository.record_upload(document_id, slack_channel_id)
         if not created:
-            return {"document_id": str(document_id), "duplicate": True}
+            return {"document_id": str(document_id), "duplicate": True, "filename": filename}
         shutil.copyfile(source, destination)
         await self.repository.update_document(document_id, status="processing")
         try:
             result = await self.graph.ainvoke({
                 "document_id": str(document_id), "path": str(destination),
-                "filename": filename, "sha256": digest,
+                "filename": filename, "sha256": digest, "progress_cb": on_progress,
             })
             return {
-                "document_id": str(document_id), "duplicate": False,
+                "document_id": str(document_id), "duplicate": False, "filename": filename,
                 "chunks": result["chunk_count"], "page_count": result["page_count"],
                 "text_char_count": result["text_char_count"],
                 "extraction_method": result["extraction_method"],
@@ -89,13 +104,27 @@ class IngestionService:
             await self.repository.update_document(document_id, status="failed", error=str(exc)[:500])
             raise
 
+    async def _report(self, state: IngestionState, stage: str, done: int = 0, total: int = 0) -> None:
+        """Persist progress for the dashboard and notify Slack; never fails ingestion."""
+        try:
+            await self.repository.set_document_progress(
+                UUID(state["document_id"]), stage, done, total,
+            )
+            callback = state.get("progress_cb")
+            if callback:
+                await callback(stage, done, total, progress_percent(stage, done, total))
+        except Exception:  # noqa: BLE001 - progress is best-effort
+            logger.warning("progress update failed for %s", state.get("filename"), exc_info=True)
+
     async def _parse(self, state: IngestionState) -> dict:
         path = Path(state["path"])
+        await self._report(state, "parsing")
         pages = await asyncio.to_thread(self._read_pages, path)
         low_pages = sum(len(re.sub(r"\s+", "", page)) < 50 for page in pages)
         average = sum(len(page.strip()) for page in pages) / max(len(pages), 1)
         extraction_method = "native"
         if low_pages / max(len(pages), 1) > 0.30 and average < 100:
+            await self._report(state, "ocr")
             pages = await self._ocr_pages(path)
             extraction_method = "ocr"
         if not any(page.strip() for page in pages):
@@ -145,13 +174,21 @@ class IngestionService:
             output.unlink(missing_ok=True)
 
     async def _chunk(self, state: IngestionState) -> dict:
+        await self._report(state, "chunking")
         chunks = chunk_pages(state["pages"])
         return {"chunks": [chunk.__dict__ for chunk in chunks]}
 
     async def _embed(self, state: IngestionState) -> dict:
-        return {"embeddings": await self.embedder.embed([item["text"] for item in state["chunks"]])}
+        texts = [item["text"] for item in state["chunks"]]
+        embeddings: list[list[float]] = []
+        await self._report(state, "embedding", 0, len(texts))
+        for start in range(0, len(texts), EMBED_BATCH):
+            embeddings.extend(await self.embedder.embed(texts[start:start + EMBED_BATCH]))
+            await self._report(state, "embedding", len(embeddings), len(texts))
+        return {"embeddings": embeddings}
 
     async def _store(self, state: IngestionState) -> dict:
+        await self._report(state, "storing")
         payload = []
         for chunk, embedding in zip(state["chunks"], state["embeddings"], strict=True):
             payload.append({

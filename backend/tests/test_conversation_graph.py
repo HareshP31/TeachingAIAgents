@@ -20,6 +20,9 @@ class MemoryRepository:
     def __init__(self) -> None:
         self.run: dict[str, Any] = {}
         self.logs: list[dict[str, Any]] = []
+        self.documents: list[dict[str, Any]] = []
+        self.searched_with: list[list[str] | None] = []
+        self.index_channels: list[str | None] = []
 
     async def update_run(self, run_id, **fields):
         self.run.update(fields)
@@ -34,7 +37,12 @@ class MemoryRepository:
     async def always_review(self):
         return False
 
-    async def search_chunks(self, embedding, limit=8, *, include_historical=False):
+    async def document_index(self, channel_id=None):
+        self.index_channels.append(channel_id)
+        return self.documents
+
+    async def search_chunks(self, embedding, limit=8, *, include_historical=False, document_ids=None):
+        self.searched_with.append(document_ids)
         return [{"text": "Cloud acquisition guidance", "page_start": 1, "page_end": 1,
                  "filename": "Cloud Acquisition Guidebook.pdf", "score": 0.9}]
 
@@ -87,3 +95,30 @@ async def test_market_route_revises_interrupts_and_resumes() -> None:
     ))
     assert resumed["final_answer"]
     assert repository.run["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_scoped_question_skips_web_research_and_filters_retrieval() -> None:
+    graph, repository = graph_fixture()
+    repository.documents = [{
+        "id": "doc-1", "filename": "Acme Program Plan.pdf", "nickname": "acme plan",
+        "is_canonical": True, "channel_linked_at": None, "last_uploaded_at": None, "created_at": 1,
+    }]
+    # "vendor" and "contract" would normally trigger web research.
+    result = await graph.start(state("What does the acme plan say about vendor contract risk?"))
+    assert result["route"] == "analyst"
+    assert result["document_ids"] == ["doc-1"]
+    assert result["scope_label"] == "acme plan"
+    assert repository.searched_with == [["doc-1"]]
+    # the asking channel is passed along so "just uploaded" can prefer its uploads
+    assert repository.index_channels == ["test"]
+    assert "Researcher" not in [row["node"] for row in repository.logs]
+    route_log = next(row for row in repository.logs if row["node"] == "Route")
+    assert "scoped to acme plan" in route_log["summary"]
+
+
+@pytest.mark.asyncio
+async def test_unscoped_question_still_searches_everything() -> None:
+    graph, repository = graph_fixture()
+    await graph.start(state("Which acquisition pathway applies to commercial cloud hosting?"))
+    assert repository.searched_with == [None]

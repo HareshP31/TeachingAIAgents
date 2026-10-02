@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     slack_enabled: bool = False
     slack_bot_token: str | None = None
     slack_app_token: str | None = None
+    slack_auto_join: bool = True
     risk_threshold: int = Field(default=50, ge=0, le=100)
     materiality_threshold: float = Field(default=10_000_000, gt=0)
     max_revisions: int = Field(default=2, ge=1, le=5)

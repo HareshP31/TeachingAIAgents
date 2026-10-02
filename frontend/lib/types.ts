@@ -3,8 +3,12 @@ export type DocumentRow = {
   page_count?: number; text_char_count?: number; extraction_method?: string;
   version_family?: string; is_canonical: boolean; superseded_by?: string;
   corpus_import_id?: string;
+  nickname?: string | null; stage?: string | null; channel_ids: string[];
+  progress_percent: number; progress_label: string; uploaded_via_slack: boolean;
   created_at: string; updated_at: string;
 };
+
+export type DocumentPage = {items: DocumentRow[]; total: number; limit: number; offset: number};
 
 export type CorpusImportRow = {
   id: string; archive_filename: string; archive_sha256: string; status: string;
@@ -31,6 +35,6 @@ export type RunDetail = RunRow & {
 
 export type Overview = {
   mode: string; always_review: boolean; imports: CorpusImportRow[];
-  documents: DocumentRow[]; runs: RunRow[];
+  documents: DocumentRow[]; ingesting: DocumentRow[]; document_total: number; runs: RunRow[];
 };
 export type Ready = {status: string; mode: string; checks: Record<string, boolean>};
