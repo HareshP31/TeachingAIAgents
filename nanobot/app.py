@@ -249,8 +249,8 @@ async def research(request: ResearchRequest) -> dict:
         )
         stdout = b""
     summary = stdout.decode(errors="ignore").strip()
-    urls = list(dict.fromkeys(re.findall(r"https?://[^\s)>\]]+", summary)))
-    urls = [url.rstrip(".,;") for url in urls if is_allowed_url(url, allowed)]
+    urls = [url.rstrip(".,;") for url in re.findall(r"https?://[^\s)>\]]+", summary)]
+    urls = list(dict.fromkeys(url for url in urls if is_allowed_url(url, allowed)))
     if not urls:
         logger.info("nanobot agent returned no allowlisted URL, falling back to ddgs")
         try:
