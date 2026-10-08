@@ -40,9 +40,17 @@ export default function Dashboard() {
         setOverview(nextOverview); setReady(nextReady); setError(undefined);
         const target = selectedId ?? nextOverview.runs[0]?.id;
         if (target) {
-          if (!selectedId) setSelectedId(target);
+          // Selecting the default run re-runs this effect, which polls again straight away
+          // with the selection in place; this pass has nothing more to do.
+          if (!selectedId) {setSelectedId(target); return;}
           const detailResponse = await fetch(`${API}/api/runs/${target}`, {cache: "no-store"});
-          if (detailResponse.ok) setRun(await detailResponse.json());
+          // The user may have picked another run while the request was in flight.
+          if (stopped) return;
+          if (detailResponse.ok) {
+            const detail: RunDetail = await detailResponse.json();
+            if (stopped) return;
+            setRun(detail);
+          }
         }
         const active = nextOverview.runs.some(item => activeStates.has(item.status))
           || nextOverview.ingesting.some(item => item.status === "pending" || item.status === "processing");

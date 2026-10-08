@@ -49,3 +49,4 @@ Thumbs.db
 
 # Ad-hoc /api/dev/runs test captures (not app logs; real run data lives in Postgres)
 dev-runs/
+*.tsbuildinfo

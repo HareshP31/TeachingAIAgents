@@ -16,3 +16,15 @@ npm run build
 ```
 
 Set `NEXT_PUBLIC_API_URL` when the backend is not on `http://localhost:8000`.
+
+## Tests
+
+Vitest + React Testing Library (jsdom). The backend is replaced by a stubbed `fetch`, so no services need to be running.
+
+```bash
+npm test               # run once
+npm run test:watch     # re-run on change
+npm run test:coverage  # with a per-file coverage table
+```
+
+`npm run typecheck` also type-checks the tests.
