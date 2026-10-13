@@ -197,6 +197,28 @@ describe("Dashboard run detail", () => {
     expect(review).toHaveClass("waiting");
   });
 
+  it("shows an out-of-scope run like any other: listed, traced, audited and answered", async () => {
+    serve({
+      overview: makeOverview({runs: [makeRun({status: "declined", route: "declined", question: "Winning lottery numbers?"})]}),
+      runs: {"run-1": makeRunDetail({
+        status: "declined", route: "declined", question: "Winning lottery numbers?",
+        final_answer: "I can only help with USSF acquisition research.",
+        log: [
+          makeLog("ScopeGate", {sequence: 1, summary: "out_of_scope: Question is about an unrelated topic"}),
+          makeLog("Decline", {sequence: 2, summary: "Out of scope; no research, drafting or audit was run"}),
+        ],
+      })},
+    });
+    await mount();
+    expect(screen.getByRole("button", {name: /Winning lottery numbers\?/}).textContent).toContain("declined");
+    expect(document.querySelector(".status-rail")).toHaveClass("declined");
+    expect([...document.querySelectorAll(".audit-list .audit-node")].map(el => el.textContent)).toEqual(["Decline", "ScopeGate"]);
+    expect(screen.getByText("out_of_scope: Question is about an unrelated topic")).toBeInTheDocument();
+    expect([...document.querySelectorAll(".graph-node")].map(el => el.textContent)).toEqual(["ScopeGate", "Decline"]);
+    expect(screen.getByText("I can only help with USSF acquisition research.")).toBeInTheDocument();
+    expect(screen.getByText("Declined: out of scope")).toBeInTheDocument();
+  });
+
   it("feeds the risk card from the run", async () => {
     detail({risk_score: 80, risk_flags: ["vendor_lock_in"], risk_breakdown: {total: 80, vendor_lock_in: 30}});
     await mount();

@@ -212,7 +212,7 @@ Everything above in one table — same technologies as the other sections, just 
 |---|---|---|---|
 | Interface | Chat | Slack Bolt (Python, Socket Mode) | The only place a human types requests in or reads answers out. No business logic. |
 | Interface | Dashboard | Next.js + shadcn/ui + Recharts | Read-only mirror of Postgres — metrics, graph trace, audit log. Never accepts input. |
-| Orchestration | Graph engine | LangGraph (Python) | Runs two graphs: **ConversationGraph** (Route → Researcher → Analyst → Auditor → HumanReview → Notify) per Slack message, and **IngestionGraph** (parse → chunk → embed → store) per uploaded document. |
+| Orchestration | Graph engine | LangGraph (Python) | Runs two graphs: **ConversationGraph** (ScopeGate → Route → Researcher → Analyst → Auditor → HumanReview → Notify; an out-of-scope question goes ScopeGate → Decline instead) per Slack message, and **IngestionGraph** (parse → chunk → embed → store) per uploaded document. |
 | Orchestration | API/backend | FastAPI | Hosts LangGraph, the Slack integration, and the API the dashboard reads from. |
 | Execution | Task Execution Agent | nanobot (sandboxed, Docker), its own tool-call reasoning backed by Qwen2.5-7B-Instruct via LM Studio | The "Researcher" node — live web search, scoped file I/O. |
 | Execution | Document Analysis Agent | Qwen2.5-7B-Instruct Q4_K_M via LM Studio (the standard model for every reasoning role — Analyst, Auditor, and nanobot's own tool-use reasoning) | The "Analyst" and "Auditor" nodes — RAG over the guideline corpus, compliance reasoning, drafts and critiques answers. Two separate calls/prompts, same running model instance. |

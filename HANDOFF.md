@@ -50,22 +50,24 @@ Added `logging.basicConfig` + explicit log lines on timeout, non-zero exit, and 
 
 ## 4. What's left toward the full architecture-doc plan
 
-Roughly in the order I'd tackle them:
+Roughly in the order I'd tackle them (items marked ✅ are finished; the numbering is kept so older references still match):
 
-1. **PDF ingestion via Slack (IngestionGraph)** — drag a new DAU PDF into the channel, confirm `file_shared` → ingestion → dashboard/Postgres updates. User is sourcing more DAU documents for this next.
+1. ✅ **DONE — PDF ingestion via Slack (IngestionGraph)** — a PDF dragged into the channel flows through `file_shared` → ingestion → dashboard/Postgres, verified live. The ingestion service and Slack upload handler also have automated tests now (see §7).
 2. **Validate the auto-approve path** — every real run so far (3 for 3) has landed on risk score 80 / forced HumanReview escalation. The architecture doc's own step-1 demo question is supposed to score ~0 and go straight to `Notify` with **no** pause. This side of the risk-threshold split has never actually been observed firing on this hardware — worth deliberately testing before assuming it works.
-3. **Dashboard, fully verified against real (non-fake) data** — the Next.js frontend ([frontend/app/page.tsx](frontend/app/page.tsx)) is a complete, real implementation (not a stub) that polls `/api/overview`, `/health/ready`, `/api/runs/{id}` — it's just never been opened and eyeballed rendering our actual local-mode runs. `docker compose up -d frontend`, open `localhost:3000`.
+3. ✅ **DONE — Dashboard verified against real (non-fake) data** — the Next.js frontend ([frontend/app/page.tsx](frontend/app/page.tsx)) was opened and checked against real local-mode runs. It also has a component/behaviour test suite now (see §7).
 4. **The "blocked action" security moment** (architecture doc §7, demo beat 5) — ask the agent to do something outside Nanobot's sandbox scope (e.g. read a file outside its staging directory) and confirm it's denied *and logged*. Never tested this session.
 5. **`ALWAYS_REVIEW` toggle** — never exercised. `docker compose exec backend python -m app.cli always-review true` forces every run through HumanReview regardless of risk score (see chat log for full mechanics — Approve/Reject already do exactly "accept as-is" / "refire the graph via Researcher" respectively, this toggle just changes when that prompt appears).
-6. **Backend's own `pytest` suite** — never run this session. Should be step zero before trusting further changes, especially since `nanobot/app.py` was hand-edited today with zero test coverage of its own.
-7. **Nanobot test coverage (currently zero)** — concrete candidates: `configure_nanobot()` config-generation correctness (would have caught bug 1 immediately), `is_allowed_url()` allowlist logic, `host_is_public()` SSRF protection, `/research` fallback branching (mock the subprocess for timeout/error/success cases), `fetch_finding()`'s size-cap/redirect-cap/content-type guards.
+6. ✅ **DONE — Backend's own `pytest` suite** — run, baseline recorded, and extended (50 → 133 tests). See §7.
+7. ✅ **DONE — Nanobot test coverage** — 96 tests, 99% of `nanobot/app.py`, including the config-generation regression test for bug 1, the allowlist, SSRF, `/research` fallback branching and `fetch_finding()` guards. See §7.
 8. **URL-citation hardening for Nanobot's real path** — either strengthen the research prompt to demand explicit URL citation, or read URLs from Nanobot's own tool-call history (`workspace/memory/history.jsonl`) instead of only regexing final response text. Would reduce how often a genuinely-successful real Nanobot call still gets counted as a fallback.
 9. **`scripts/backup.sh` / `restore.sh`** — untested this session. Given the Git-Bash path-mangling issues hit elsewhere, worth a dry run before relying on either, particularly `restore.sh` since it's destructive (drops/rebuilds Postgres, wipes `/data/documents`, moves aside `data/guidebooks`).
-10. **Demo pacing** — real full runs take 120–215 seconds each on this hardware. Two demo questions plus a security moment in a 10–15 minute window is tight; worth a timed full rehearsal once ingestion (#1) is done.
+10. **Demo pacing** — real full runs take 120–215 seconds each on this hardware. Two demo questions plus a security moment in a 10–15 minute window is tight; worth a timed full rehearsal now that ingestion (#1) is done.
 11. **Multi-teammate Slack usage** — if a teammate wants to run their *own* parallel backend against the *same* Slack app/tokens, both instances receive every event and would double-respond (Slack allows multiple concurrent Socket Mode connections per app). Fine if only one person runs the backend while others just type in Slack; needs a second Slack app (own token pair) if true parallel local dev is wanted.
 12. **Let a Slack reviewer type *why* they're rejecting, not just click Reject** — the plumbing already exists end to end: `ReviewDecision.note` ([schemas.py:66](backend/app/schemas.py:66)) flows into a `CitationIssue` on rejection ([conversation_graph.py:166-170](backend/app/graphs/conversation_graph.py:166)), which the real Analyst reads back as `audit_feedback` on the next revision pass ([analyst.py:67](backend/app/agents/analyst.py:67)) — confirmed via the dev API, which already accepts a free-text `note` in its POST body and has it reach the next Analyst call. The gap is Slack-specific: the Reject *button* ([bolt_app.py:136-137](backend/app/slack/bolt_app.py:136)) hardcodes `note="Reviewer requested revision"` because a button click carries no free text.
     **Confirmed feasible with no new dependencies or Slack scopes:** checked directly against the pinned packages in this repo — `slack_bolt.async_app.AsyncApp` already exposes `.view()` for handling modal submissions, and `slack_sdk.web.async_client.AsyncWebClient` already exposes `.views_open()` for opening one. The manifest's existing `interactivity.is_enabled: true` is all Slack requires for both (no extra OAuth scope). Every block-action payload (the Reject click) already includes a `trigger_id`, which is exactly what `views_open` needs and is only valid for ~3 seconds — so it must be used immediately in the same handler, not after any other await.
     **Shape of the fix:** change the Reject action handler to call `client.views_open(trigger_id=body["trigger_id"], view={...one text input block..., "private_metadata": json.dumps({run_id, thread_id, channel, thread_ts})})` instead of resolving immediately; add a new `@app.view("<callback_id>")` handler that reads the submitted text + `private_metadata`, builds `ReviewDecision(approved=False, note=<typed text>)`, and calls `graph.resume(...)` exactly as `_resume_review` does today. Approve stays a plain button (no text needed). LangGraph's Postgres checkpointer already tolerates arbitrarily long pauses (that's the whole point of the interrupt design), so the extra time a reviewer takes typing in the modal changes nothing architecturally.
+    **Test impact:** `backend/tests/test_slack_handlers.py` currently asserts the hardcoded `"Reviewer requested revision"` note on Reject (`test_reject_resumes_with_a_revision_note`); update it, and add tests for the modal-open and view-submission handlers, when this is built.
+13. **A failed PDF ingestion can't be retried by re-uploading the same file.** Documents are keyed by content hash, so re-uploading identical bytes after a failure (e.g. a transient DB error during storing) is reported as a duplicate and the document stays `failed`. Pinned by `test_a_failed_document_can_be_retried_only_by_new_upload_not_reprocessed` in `backend/tests/test_ingestion.py`. Decide whether a `failed` duplicate should be re-processed; if so, change `IngestionService.ingest_path` and that test.
 
 ---
 
@@ -96,3 +98,59 @@ Frontend was stopped mid-session to save resources during heavy CLI testing — 
 6. **Adding the bot to a new channel:** the bot only sees messages and PDF uploads in channels it is a member of. In the new channel, type `/invite @Teaching AI Agents` (the bot's display name from [slack-app-manifest.yaml](slack-app-manifest.yaml)) and press Enter. Alternatives: `@mention` the bot in the channel and click **Add to Channel** on Slack's prompt, or open the channel's **Integrations** tab and choose **Add apps**. For a private channel, an existing member must do this. Until then, questions and uploads in that channel are silently ignored.
    **Automatic join (public channels only):** with `SLACK_AUTO_JOIN=true` (the default) the bot joins every newly created *public* channel on its own and posts a short hello, so no `/invite` is needed. This needs the `channels:join` and `channels:read` scopes plus the `channel_created` event, all in [slack-app-manifest.yaml](slack-app-manifest.yaml). An already-installed app must be updated: api.slack.com/apps → your app → **App Manifest** → paste the updated file → Save → **Reinstall to Workspace**; then restart the backend. Channels that existed before this still need one manual `/invite`, and private channels always do.
    Channels are just normal Slack channels. Every PDF uploaded in any channel joins the one shared library and is searchable from all channels; "the document I just uploaded" prefers the newest upload in the asking channel.
+
+---
+
+## 7. Automated tests (added 2026-10-08)
+
+None of these need LM Studio, Slack, Postgres or network access — everything external is faked. No CI is configured on purpose; run them by hand.
+
+| Suite | Tests | Where | Notes |
+|---|---|---|---|
+| Backend | 133 | `backend/tests/` | `--cov=app` total is **61%** (was 47% before the ingestion and Slack tests) |
+| Nanobot | 96 | `nanobot/tests/` | 99% of `nanobot/app.py` |
+| Frontend | 93 | `frontend/tests/` | ~99% of `page.tsx` and the three components |
+
+### How to run them
+
+None of the Python dependencies are installed on the Windows host, and `pytest` is not baked into the Docker images, so the Python suites run in a throwaway container from the already-built images, with the source folder mounted (nothing is written to the repo). Git Bash on Windows needs `MSYS_NO_PATHCONV=1` and `pwd -W`:
+
+```bash
+# backend (add  -o addopts='-q' --cov=app --cov-report=term  for whole-app coverage)
+MSYS_NO_PATHCONV=1 docker run --rm --user root -v "$(pwd -W)/backend:/app" -w /app \
+  --entrypoint sh teachingaiagents-backend \
+  -c "pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider"
+
+# nanobot
+MSYS_NO_PATHCONV=1 docker run --rm --user root -v "$(pwd -W)/nanobot:/app" -w /app \
+  --entrypoint sh teachingaiagents-nanobot \
+  -c "pip install -q -r requirements-dev.txt && python -m pytest -p no:cacheprovider"
+
+# frontend (runs on the host; deps are in frontend/node_modules)
+cd frontend && npm test            # also: npm run test:watch, npm run test:coverage, npm run typecheck
+```
+
+Rebuild the images first if requirements changed. `backend/pytest.ini` only reports coverage for `risk` and `chunking`; pass `--cov=app` (see above) to see the real picture.
+
+### What each suite covers
+
+- **Backend** (existing): scope resolution, risk scoring, chunking, evidence compaction, corpus archive validation, evaluation, LLM message parsing, the conversation graph (fake mode), Slack auto-join.
+  - **New `test_ingestion.py`** (28): native/OCR/encrypted/corrupt/oversize PDFs, 50 MB and 1000-page limits, duplicate detection and upload-channel recording, embedding batching, progress reporting that never fails ingestion, failed-status handling with truncated errors, and the `ocrmypdf` subprocess (success, failure, timeout, kill).
+  - **New `test_slack_handlers.py`** (55): handler wiring, question intake (bot/subtype/empty filtering, thread ids, duplicate events), review card payload, approve/reject resume, and the PDF upload path (auth header, filename sanitising, 50 MB limit declared and streamed, throttled progress edits, safe failure messages, temp-file cleanup, channel fallback).
+  - `tests/pdf_helpers.py` builds test PDFs (text, blank, encrypted) without touching `scripts/`.
+- **Nanobot**: generated `config.json` (context/output tokens from env — the bug-1 regression), allowlist and SSRF checks, `fetch_finding()` guards (redirects, allowlist at every hop, size cap, content types, timeouts), `/research` branching (agent success, ddgs fallback on no URL / non-zero exit / timeout, 502 and 504 paths), and subprocess cleanup on timeout and cancellation.
+- **Frontend** (Vitest + React Testing Library + jsdom, `fetch` stubbed): `RiskCard` thresholds and breakdown, `GraphTrace` stages/counters/waiting state, `DocumentsTable` paging, debounced search and nickname editing, and the `Dashboard` page (header status, runs list/selection, run detail, ingestion progress, polling cadence, error banner and retry, run-selection races).
+
+### Bugs the tests found (both fixed)
+
+- **Nanobot `/research`:** the same URL appearing with and without trailing punctuation (`…/opp/1.` and `…/opp/1`) became two identical findings, because de-duplication ran before the punctuation was stripped. Now strips first. Fix in `nanobot/app.py`, regression test in `nanobot/tests/test_research.py`.
+- **Dashboard run selection:** `poll()` in `frontend/app/page.tsx` didn't re-check that it was still current after the slow run-detail request, so clicking another run could let the previous run's late response overwrite the panel, and left an orphaned polling timer. Fixed, and first load no longer fetches the default run's detail twice. Regression tests in `frontend/tests/dashboard.test.tsx` ("run selection races").
+
+### Known gaps
+
+- Postgres-dependent code is untested: `repository.py` (20%), `migrations.py`, `database.py`, `main.py` API routes (0%), `cli.py` (0%). These need a real pgvector instance (e.g. a throwaway compose service or testcontainers) — mark them as a separate "integration" group so the fast suites stay offline.
+- `bolt_app.py` constructor wiring and `start`/`stop` need a real Slack connection or a heavier mock.
+- Real `Auditor`/`Analyst`/`LMStudioClient` paths (structured-output retries, truncation at `max_tokens`) have no unit tests; the evaluation harness (`app.cli eval-corpus`) is what exercises them end to end.
+- Nanobot's DNS-rebinding exposure (`host_is_public` resolves once, `httpx` resolves again at connect time) can't be closed by a test; the fix is pinning the connection to the validated IP.
+- `nanobot/app.py:115` (redirect with no `Location` header) is dead code: httpx never treats such a response as a redirect.
+- The frontend has no browser-level (Playwright) tests, and Recharts pie slices aren't asserted on (jsdom doesn't lay out SVG).

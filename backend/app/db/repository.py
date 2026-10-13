@@ -146,7 +146,7 @@ class Repository:
         values = [Jsonb(value) if key in json_fields else value for key, value in clean.items()]
         assignments = [f"{key} = %s" for key in clean]
         assignments.append("updated_at = now()")
-        if clean.get("status") in {"completed", "failed"}:
+        if clean.get("status") in {"completed", "declined", "failed"}:
             assignments.append("completed_at = now()")
         async with self.database.connection() as conn, conn.transaction():
             await conn.execute(

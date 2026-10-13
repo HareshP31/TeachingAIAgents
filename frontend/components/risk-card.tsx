@@ -17,8 +17,8 @@ export function RiskCard({run}: {run?: RunDetail}) {
         </ResponsiveContainer>
         <strong>{score}</strong><small>/100</small>
       </div>
-      <div className="risk-state"><span className={`state-dot ${score >= 50 ? "warn" : "safe"}`}/>
-        {run ? (run.review_status === "approved" ? "Human approved" : score >= 50 ? "Human review" : "Auto-approved") : "No run selected"}
+      <div className="risk-state"><span className={`state-dot ${score >= 50 || run?.status === "declined" ? "warn" : "safe"}`}/>
+        {run ? (run.status === "declined" ? "Declined: out of scope" : run.review_status === "approved" ? "Human approved" : score >= 50 ? "Human review" : "Auto-approved") : "No run selected"}
       </div>
     </div>
     <div className="risk-breakdown">

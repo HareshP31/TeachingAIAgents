@@ -17,6 +17,7 @@ from app.services.corpus import CorpusImportService
 from app.services.embeddings import FakeEmbedder, SentenceTransformerEmbedder
 from app.services.evaluation import CorpusEvaluator, write_report
 from app.services.llm import LMStudioClient
+from app.services.scope_gate import ScopeGate, evaluate_scope_gate
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -96,6 +97,19 @@ async def run(args: argparse.Namespace) -> None:
                 if metric in report:
                     output[metric] = report[metric]
             print(json.dumps(output))
+        elif args.command == "eval-scope":
+            # fake/test = scripted keyword stand-in, so only blatant off-topic
+            # cases are caught. Run with APP_MODE=local/live to score the real
+            # Qwen classifier through LM Studio.
+            fake = settings.app_mode in {"fake", "test"}
+            llm = None if fake else LMStudioClient(
+                settings.lm_studio_base_url, settings.lm_studio_api_key, settings.lm_studio_model,
+            )
+            report = await evaluate_scope_gate(ScopeGate(llm, fake), Path(args.cases))
+            write_report(report, Path(args.output))
+            print(json.dumps({key: value for key, value in report.items() if key != "results"}))
+            if report["false_refusals"]:
+                raise SystemExit(2)
     finally:
         await database.close()
 
@@ -121,6 +135,11 @@ def main() -> None:
     )
     evaluation.add_argument("--output", default="/data/documents/evaluations/latest.json")
     evaluation.add_argument("--full", action="store_true")
+    scope = commands.add_parser("eval-scope", help="Score the off-topic scope gate on labelled questions")
+    scope.add_argument(
+        "--cases", default=str(Path(__file__).parent / "evals" / "scope_gate_cases.yaml"),
+    )
+    scope.add_argument("--output", default="/data/documents/evaluations/scope-gate.json")
     review = commands.add_parser("always-review")
     review.add_argument("enabled", choices=["true", "false"])
     asyncio.run(run(parser.parse_args()))

@@ -13,6 +13,7 @@ from app.config import Settings
 from app.db.repository import Repository
 from app.schemas import AuditResult, CitationIssue, ConversationState, ReviewDecision
 from app.services.risk import calculate_risk
+from app.services.scope_gate import DECLINE_MESSAGE, ScopeGate, ScopeVerdict
 from app.services.scope import resolve_scope, wants_historical
 
 
@@ -26,12 +27,14 @@ class ConversationGraph:
     def __init__(
         self, repository: Repository, researcher: Researcher, analyst: Analyst,
         auditor: Auditor, settings: Settings, checkpointer: Any | None = None,
+        *, scope_gate: ScopeGate | None = None,
     ) -> None:
         self.repository = repository
         self.researcher = researcher
         self.analyst = analyst
         self.auditor = auditor
         self.settings = settings
+        self.scope_gate = scope_gate
         builder = StateGraph(ConversationState)
         builder.add_node("route", self._route)
         builder.add_node("researcher", self._researcher)
@@ -39,7 +42,18 @@ class ConversationGraph:
         builder.add_node("auditor", self._auditor)
         builder.add_node("human_review", self._human_review)
         builder.add_node("notify", self._notify)
-        builder.add_edge(START, "route")
+        if scope_gate:
+            # Off-topic questions are declined here, before Route, so nothing
+            # downstream (retrieval, LLM drafting, audit, review) ever runs for them.
+            builder.add_node("scope_gate", self._scope_gate)
+            builder.add_node("decline", self._decline)
+            builder.add_edge(START, "scope_gate")
+            builder.add_conditional_edges("scope_gate", self._after_scope_gate, {
+                "route": "route", "decline": "decline",
+            })
+            builder.add_edge("decline", END)
+        else:
+            builder.add_edge(START, "route")
         builder.add_conditional_edges("route", self._after_route, {
             "researcher": "researcher", "analyst": "analyst",
         })
@@ -77,6 +91,43 @@ class ConversationGraph:
         return await self.graph.ainvoke(
             Command(resume=decision.model_dump()), config=self.config(thread_id),
         )
+
+    async def _scope_gate(self, state: ConversationState) -> dict:
+        assert self.scope_gate is not None
+        question = state["question"]
+        # A question that names an uploaded or nicknamed document is about that
+        # document by definition, whatever the document covers: skip the classifier.
+        scope = resolve_scope(
+            question, await self.repository.document_index(state.get("channel_id")),
+            include_historical=wants_historical(question),
+        )
+        if scope:
+            verdict = ScopeVerdict(
+                verdict="in_scope", reason=f"references {scope.label}; classifier skipped",
+            )
+        else:
+            verdict = await self.scope_gate.classify(question)
+        await self.repository.log_node(
+            state["run_id"], "ScopeGate", f"{verdict.verdict}: {verdict.reason}",
+            details={"verdict": verdict.verdict, "reason": verdict.reason},
+        )
+        return {"scope_verdict": verdict.verdict, "scope_reason": verdict.reason}
+
+    @staticmethod
+    def _after_scope_gate(state: ConversationState) -> str:
+        return "decline" if state.get("scope_verdict") == "out_of_scope" else "route"
+
+    async def _decline(self, state: ConversationState) -> dict:
+        reason = state.get("scope_reason", "")
+        await self.repository.update_run(
+            state["run_id"], status="declined", route="declined",
+            route_reason=f"out of scope: {reason}", final_answer=DECLINE_MESSAGE,
+        )
+        await self.repository.log_node(
+            state["run_id"], "Decline", "Out of scope; no research, drafting or audit was run",
+            details={"reason": reason},
+        )
+        return {"route": "declined", "final_answer": DECLINE_MESSAGE}
 
     async def _route(self, state: ConversationState) -> dict:
         question = state["question"]

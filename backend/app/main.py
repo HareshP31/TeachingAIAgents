@@ -24,6 +24,7 @@ from app.schemas import ConversationState, ReviewDecision
 from app.services.embeddings import FakeEmbedder, SentenceTransformerEmbedder
 from app.services.llm import LMStudioClient
 from app.services.research import ResearchClient
+from app.services.scope_gate import ScopeGate
 from app.slack.bolt_app import SlackRuntime, interrupt_payload
 
 
@@ -57,7 +58,7 @@ async def lifespan(app: FastAPI):
     graph = ConversationGraph(
         repository, Researcher(research_client),
         Analyst(repository, embedder, settings, llm, fake), Auditor(llm, fake),
-        settings, checkpointer,
+        settings, checkpointer, scope_gate=ScopeGate(llm, fake),
     )
     ingestion = IngestionService(repository, embedder, settings)
     slack: SlackRuntime | None = None

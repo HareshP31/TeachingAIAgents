@@ -13,6 +13,7 @@ from app.graphs.conversation_graph import ConversationGraph
 from app.schemas import ConversationState, ReviewDecision
 from app.services.embeddings import FakeEmbedder
 from app.services.research import ResearchClient
+from app.services.scope_gate import DECLINE_MESSAGE, ScopeGate
 from app.slack.bolt_app import interrupt_payload
 
 
@@ -122,3 +123,112 @@ async def test_unscoped_question_still_searches_everything() -> None:
     graph, repository = graph_fixture()
     await graph.start(state("Which acquisition pathway applies to commercial cloud hosting?"))
     assert repository.searched_with == [None]
+
+
+class StubLLM:
+    """Stands in for LMStudioClient.chat_json in the scope classifier."""
+
+    def __init__(self, result: dict | Exception) -> None:
+        self.result = result
+        self.calls = 0
+
+    async def chat_json(self, messages, schema, **kwargs):
+        self.calls += 1
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def gated_graph(gate: ScopeGate | None = None) -> tuple[ConversationGraph, MemoryRepository]:
+    graph, repository = graph_fixture()
+    graph = ConversationGraph(
+        repository, graph.researcher, graph.analyst, graph.auditor, graph.settings,
+        scope_gate=gate or ScopeGate(None, True),
+    )
+    return graph, repository
+
+
+def nodes(repository: MemoryRepository) -> list[str]:
+    return [row["node"] for row in repository.logs]
+
+
+@pytest.mark.asyncio
+async def test_off_topic_question_is_declined_before_anything_else_runs() -> None:
+    graph, repository = gated_graph()
+    result = await graph.start(state("What are the winning lottery numbers?"))
+    assert result["final_answer"] == DECLINE_MESSAGE
+    assert repository.run["status"] == "declined"
+    assert repository.run["route"] == "declined"
+    assert repository.run["final_answer"] == DECLINE_MESSAGE
+    assert repository.run["route_reason"].startswith("out of scope:")
+    # Only the gate and the decline are recorded: no routing, retrieval, drafting or audit.
+    assert nodes(repository) == ["ScopeGate", "Decline"]
+    assert repository.searched_with == []
+    assert "risk_score" not in repository.run
+    assert repository.logs[0]["summary"].startswith("out_of_scope:")
+
+
+@pytest.mark.asyncio
+async def test_in_scope_question_runs_the_unchanged_pipeline_after_the_gate() -> None:
+    graph, repository = gated_graph()
+    result = await graph.start(state("Which acquisition pathway applies to commercial cloud hosting?"))
+    assert result["route"] == "analyst"
+    assert repository.run["status"] == "completed"
+    assert nodes(repository) == ["ScopeGate", "Route", "Analyst", "Auditor", "Notify"]
+    assert repository.logs[0]["summary"].startswith("in_scope:")
+
+
+@pytest.mark.asyncio
+async def test_market_run_still_interrupts_and_resumes_behind_the_gate() -> None:
+    graph, repository = gated_graph()
+    initial = state("What vendors have recent Space Force contracts under Cloud One?")
+    result = await graph.start(initial)
+    assert interrupt_payload(result) is not None
+    assert nodes(repository).count("ScopeGate") == 1
+    resumed = await graph.resume(initial["thread_id"], ReviewDecision(approved=True, reviewer_id="r"))
+    assert resumed["final_answer"]
+    assert repository.run["status"] == "completed"
+    # Resuming a paused run must not send it back through the gate.
+    assert nodes(repository).count("ScopeGate") == 1
+
+
+@pytest.mark.asyncio
+async def test_question_about_a_document_skips_the_classifier() -> None:
+    llm = StubLLM({"verdict": "out_of_scope", "reason": "unrelated"})
+    graph, repository = gated_graph(ScopeGate(llm, False))
+    repository.documents = [{
+        "id": "doc-1", "filename": "Acme Program Plan.pdf", "nickname": "acme plan",
+        "is_canonical": True, "channel_linked_at": None, "last_uploaded_at": None, "created_at": 1,
+    }]
+    await graph.start(state("What does the acme plan say about lottery numbers?"))
+    assert llm.calls == 0
+    assert repository.run["status"] == "completed"
+    assert "classifier skipped" in repository.logs[0]["summary"]
+
+
+@pytest.mark.asyncio
+async def test_unclear_verdict_is_let_through() -> None:
+    llm = StubLLM({"verdict": "unclear", "reason": "too short to tell"})
+    graph, repository = gated_graph(ScopeGate(llm, False))
+    await graph.start(state("What are the key risks?"))
+    assert llm.calls == 1
+    assert repository.run["status"] == "completed"
+    assert repository.logs[0]["summary"] == "unclear: too short to tell"
+
+
+@pytest.mark.asyncio
+async def test_classifier_failure_fails_open() -> None:
+    graph, repository = gated_graph(ScopeGate(StubLLM(RuntimeError("LM Studio down")), False))
+    await graph.start(state("Which acquisition pathway applies to commercial cloud hosting?"))
+    assert repository.run["status"] == "completed"
+    assert repository.logs[0]["summary"].startswith("unclear:")
+
+
+@pytest.mark.asyncio
+async def test_confident_llm_refusal_declines_the_run() -> None:
+    llm = StubLLM({"verdict": "out_of_scope", "reason": "banana bread is not acquisition"})
+    graph, repository = gated_graph(ScopeGate(llm, False))
+    await graph.start(state("Give me a recipe for banana bread"))
+    assert repository.run["status"] == "declined"
+    assert nodes(repository) == ["ScopeGate", "Decline"]
+    assert repository.logs[0]["details"]["reason"] == "banana bread is not acquisition"

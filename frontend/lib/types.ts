@@ -17,6 +17,7 @@ export type CorpusImportRow = {
 };
 
 export type RunRow = {
+  // status: queued | running | awaiting_review | completed | declined (out of scope) | failed
   id: string; question: string; route?: string; status: string; risk_score: number;
   risk_flags: string[]; review_status?: string; revision_count: number; created_at: string;
 };

@@ -1,6 +1,6 @@
 # Teaching AI Agents
 
-Local-first acquisition research and audit system. Slack drives two LangGraph workflows: PDF ingestion (`parse → chunk → embed → store`) and audited conversation runs (`Route → Researcher → Analyst → Auditor → HumanReview → Notify`). A read-only dashboard mirrors Postgres telemetry in real time.
+Local-first acquisition research and audit system. Slack drives two LangGraph workflows: PDF ingestion (`parse → chunk → embed → store`) and audited conversation runs (`ScopeGate → Route → Researcher → Analyst → Auditor → HumanReview → Notify`; off-topic questions leave at `ScopeGate` for `Decline`). A read-only dashboard mirrors Postgres telemetry in real time.
 
 ## Quick start (real local inference)
 
@@ -66,6 +66,9 @@ docker compose exec backend python -m app.cli import-archive /data/guidebooks/dr
 docker compose exec backend python -m app.cli corpus-status
 docker compose exec backend python -m app.cli eval-corpus --output /data/documents/eval-report.json
 docker compose exec backend python -m app.cli eval-corpus --full --output /data/documents/eval-report-full.json
+
+# score the off-topic scope gate on labelled questions (exits 2 on any false refusal)
+docker compose exec backend python -m app.cli eval-scope
 docker compose exec backend python -m app.cli cleanup failed
 python3 scripts/smoke.py
 ```

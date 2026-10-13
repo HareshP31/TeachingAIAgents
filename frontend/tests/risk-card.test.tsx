@@ -26,6 +26,13 @@ describe("RiskCard", () => {
     expect(container.querySelector(".state-dot")).toHaveClass(dot);
   });
 
+  it("labels a run declined by the scope gate, not auto-approved", () => {
+    const {container} = render(<RiskCard run={makeRunDetail({status: "declined", route: "declined", risk_score: 0})}/>);
+    expect(screen.getByText("Declined: out of scope")).toBeInTheDocument();
+    expect(screen.queryByText("Auto-approved")).toBeNull();
+    expect(container.querySelector(".state-dot")).toHaveClass("warn");
+  });
+
   it("says a human approved regardless of score once the review is approved", () => {
     render(<RiskCard run={makeRunDetail({risk_score: 80, review_status: "approved"})}/>);
     expect(screen.getByText("Human approved")).toBeInTheDocument();

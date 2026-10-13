@@ -3,7 +3,7 @@ import {describe, expect, it} from "vitest";
 import {GraphTrace} from "@/components/graph-trace";
 import {makeLog} from "./fixtures";
 
-const NODES = ["Route", "Researcher", "Analyst", "Auditor", "HumanReview", "Notify"];
+const NODES = ["ScopeGate", "Route", "Researcher", "Analyst", "Auditor", "HumanReview", "Notify"];
 
 function node(name: string): HTMLElement {
   return screen.getByText(name).closest(".graph-node") as HTMLElement;
@@ -16,7 +16,7 @@ function litConnectors(container: HTMLElement): number[] {
 }
 
 describe("GraphTrace", () => {
-  it("renders all six stages in order with nothing lit for an empty log", () => {
+  it("renders all seven stages in order with nothing lit for an empty log", () => {
     const {container} = render(<GraphTrace log={[]}/>);
     expect([...container.querySelectorAll(".graph-node")].map(el => el.textContent)).toEqual(NODES);
     expect(container.querySelectorAll(".complete")).toHaveLength(0);
@@ -34,13 +34,27 @@ describe("GraphTrace", () => {
   it("only lights a connector when both ends have run", () => {
     // Route -> Analyst skips Researcher: Route/Researcher and Researcher/Analyst stay dark.
     const {container} = render(<GraphTrace log={[makeLog("Route"), makeLog("Analyst"), makeLog("Auditor")]}/>);
-    expect(litConnectors(container)).toEqual([2]); // Analyst -> Auditor
+    expect(litConnectors(container)).toEqual([3]); // Analyst -> Auditor
+  });
+
+  it("lights ScopeGate ahead of Route on a normal run", () => {
+    const {container} = render(<GraphTrace log={[makeLog("ScopeGate"), makeLog("Route")]}/>);
+    expect(node("ScopeGate")).toHaveClass("complete");
+    expect(litConnectors(container)).toEqual([0]);
+  });
+
+  it("shows only ScopeGate and Decline for an out-of-scope run", () => {
+    const {container} = render(<GraphTrace log={[makeLog("ScopeGate"), makeLog("Decline")]}/>);
+    expect([...container.querySelectorAll(".graph-node")].map(el => el.textContent)).toEqual(["ScopeGate", "Decline"]);
+    expect(node("ScopeGate")).toHaveClass("complete");
+    expect(node("Decline")).toHaveClass("complete", "declined");
+    expect(litConnectors(container)).toEqual([0]);
   });
 
   it("lights the whole path for a full run", () => {
     const log = NODES.map(name => makeLog(name, name === "HumanReview" ? {status: "completed"} : {}));
     const {container} = render(<GraphTrace log={log}/>);
-    expect(litConnectors(container)).toEqual([0, 1, 2, 3, 4]);
+    expect(litConnectors(container)).toEqual([0, 1, 2, 3, 4, 5]);
   });
 
   it("shows a revision counter once a stage has run more than once", () => {

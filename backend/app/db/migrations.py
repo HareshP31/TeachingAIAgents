@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS chunks_embedding_hnsw ON chunks USING hnsw (embedding
 CREATE TABLE IF NOT EXISTS conversation_runs (
  id uuid PRIMARY KEY, source_event_id text UNIQUE, thread_id text NOT NULL, channel_id text NOT NULL,
  requester_id text NOT NULL, question text NOT NULL, route text, route_reason text,
- status text NOT NULL CHECK (status IN ('queued','running','awaiting_review','completed','failed')),
+ status text NOT NULL CHECK (status IN ('queued','running','awaiting_review','completed','declined','failed')),
  used_researcher boolean NOT NULL DEFAULT false, research_findings jsonb NOT NULL DEFAULT '[]'::jsonb,
  draft text, final_answer text, risk_score integer NOT NULL DEFAULT 0,
  risk_breakdown jsonb NOT NULL DEFAULT '{}'::jsonb, risk_flags jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -69,6 +69,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
  updated_at timestamptz NOT NULL DEFAULT now()
 );
 INSERT INTO app_settings(singleton, always_review) VALUES (true, false) ON CONFLICT (singleton) DO NOTHING;
+DO $$
+BEGIN
+ -- Databases created before the scope gate only allow the original run statuses.
+ IF NOT EXISTS (
+  SELECT 1 FROM pg_constraint
+  WHERE conrelid = 'conversation_runs'::regclass AND conname = 'conversation_runs_status_check'
+   AND pg_get_constraintdef(oid) LIKE '%declined%'
+ ) THEN
+  ALTER TABLE conversation_runs DROP CONSTRAINT IF EXISTS conversation_runs_status_check;
+  ALTER TABLE conversation_runs ADD CONSTRAINT conversation_runs_status_check
+   CHECK (status IN ('queued','running','awaiting_review','completed','declined','failed'));
+ END IF;
+END $$;
 """
 
 

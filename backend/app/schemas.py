@@ -13,6 +13,7 @@ class RunStatus(StrEnum):
     RUNNING = "running"
     AWAITING_REVIEW = "awaiting_review"
     COMPLETED = "completed"
+    DECLINED = "declined"
     FAILED = "failed"
 
 
@@ -86,7 +87,9 @@ class ConversationState(TypedDict, total=False):
     channel_id: str
     requester_id: str
     question: str
-    route: Literal["research", "analyst"]
+    scope_verdict: Literal["in_scope", "unclear", "out_of_scope"]
+    scope_reason: str
+    route: Literal["research", "analyst", "declined"]
     route_reason: str
     document_ids: list[str]
     scope_label: str
